@@ -33,22 +33,23 @@ void ASplat4DActor::ClampCurrentFrameToAsset()
 	}
 }
 
-void ASplat4DActor::SyncFrameToComponent(bool bMarkRenderStateDirty)
+void ASplat4DActor::SyncPropertiesToComponent(bool bRecreateRenderState)
 {
 	ClampCurrentFrameToAsset();
 
 	if (Splat4DComponent)
 	{
+		Splat4DComponent->SetMaxSHDegree(MaxSHDegree);
 		Splat4DComponent->CurrentFrame = CurrentFrame;
 		Splat4DComponent->ApplyCurrentFrame();
-		Splat4DComponent->MarkRenderDynamicDataDirty();
-
-#if WITH_EDITOR
-		if (bMarkRenderStateDirty)
+		if (bRecreateRenderState)
+		{
+			Splat4DComponent->RecreateRenderState_Concurrent();
+		}
+		else
 		{
 			Splat4DComponent->MarkRenderDynamicDataDirty();
 		}
-#endif
 	}
 }
 
@@ -85,7 +86,7 @@ void ASplat4DActor::Tick(float DeltaTime)
 		}
 	}
 
-	SyncFrameToComponent(false);
+	SyncPropertiesToComponent(false);
 }
 
 #if WITH_EDITOR
@@ -93,7 +94,7 @@ void ASplat4DActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChange
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	PlaybackAccumulator = 0.0f;
-	SyncFrameToComponent(true);
+	SyncPropertiesToComponent(true);
 }
 #endif
 

@@ -106,6 +106,20 @@ public:
 		return Asset->GetColorsSRV();
 	}
 
+	FShaderResourceViewRHIRef GetSHCoefficientsSRV() const
+	{
+		check(Asset);
+		return Asset->GetSHCoefficientsSRV();
+	}
+
+	uint32 GetNumSHTriplets() const
+	{
+		check(Asset);
+		return Asset->GetNumSHTriplets();
+	}
+
+	uint32 GetSelectedSHDegree() const { return SelectedSHDegree; }
+
 	/**
 	 * @return SRV for the covariance matrix buffer.
 	 */
@@ -260,6 +274,7 @@ private:
 	bool bIsSortingOnGPU;
 	bool bIs4D = false;
 	bool bUse4DInterpolation = false;
+	uint32 SelectedSHDegree = 0;
 	float CurrentFrame = 0.0f;
 	std::optional<FSplatGPUToGPUBuffer> Indices;
 

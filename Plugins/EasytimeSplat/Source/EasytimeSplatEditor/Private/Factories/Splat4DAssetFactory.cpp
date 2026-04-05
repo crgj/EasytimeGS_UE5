@@ -134,12 +134,13 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		return nullptr;
 	}
 	EASYTIME_LOGL(
-		"[4D Import] splats=%d frames=%d xyzBanks=%d rotBanks=%d dcBanks=%d xyzStride=%d rotStride=%d dcStride=%d",
+		"[4D Import] splats=%d frames=%d xyzBanks=%d rotBanks=%d dcBanks=%d shTriplets=%d xyzStride=%d rotStride=%d dcStride=%d",
 		(int32)PLYMetadata.num_splats,
 		PLYMetadata.total_frames,
 		PLYMetadata.num_xyz_banks,
 		PLYMetadata.num_rot_banks,
 		PLYMetadata.num_dc_banks,
+		PLYMetadata.num_sh_triplets,
 		PLYMetadata.xyz_stride,
 		PLYMetadata.rot_stride,
 		PLYMetadata.dc_stride);
@@ -150,8 +151,10 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	Rotations.SetNumUninitialized(PLYMetadata.num_splats);
 	TArray<FVector3f> Scales;
 	Scales.SetNumUninitialized(PLYMetadata.num_splats);
-	TArray<FColor> Colors;
+	TArray<FVector4f> Colors;
 	Colors.SetNumUninitialized(PLYMetadata.num_splats);
+	TArray<FVector3f> SHCoefficients;
+	SHCoefficients.SetNumUninitialized(PLYMetadata.num_splats * PLYMetadata.num_sh_triplets);
 
 	// Base-frame import for UE runtime path uses the same coordinate conversion
 	// as 3DGS import.
@@ -159,10 +162,31 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		[P = std::span<FVector3f>(&Positions[0], Positions.Num()),
 	     R = std::span<FQuat4f>(&Rotations[0], Rotations.Num()),
 	     S = std::span<FVector3f>(&Scales[0], Scales.Num()),
-	     C = std::span<FColor>(&Colors[0], Colors.Num())](
+	     C = std::span<FVector4f>(&Colors[0], Colors.Num())](
 			uint32_t Index, GetPropertyFn Get)
 	{
-		ply::convert_splat(Index, Get, P, R, S, C);
+		P[Index] = FVector3f(
+			to<float>(Get(Property::Z)),
+			to<float>(Get(Property::X)),
+			-to<float>(Get(Property::Y)));
+
+		const float X = -to<float>(Get(Property::RotationZ));
+		const float Y = -to<float>(Get(Property::RotationX));
+		const float Z = to<float>(Get(Property::RotationY));
+		const float W = to<float>(Get(Property::RotationW));
+		const float Len = FMath::Max(FMath::Sqrt(X * X + Y * Y + Z * Z + W * W), KINDA_SMALL_NUMBER);
+		R[Index] = FQuat4f(X / Len, Y / Len, Z / Len, W / Len);
+
+		S[Index] = FVector3f(
+			to_scale_linear(Get(Property::ScaleZ)),
+			to_scale_linear(Get(Property::ScaleX)),
+			to_scale_linear(Get(Property::ScaleY)));
+
+		C[Index] = FVector4f(
+			to_color_srgb_float(Get(Property::DCRed)),
+			to_color_srgb_float(Get(Property::DCGreen)),
+			to_color_srgb_float(Get(Property::DCBlue)),
+			to_alpha_linear_float(Get(Property::Opacity)));
 	};
 
 	if (!Parser.parse_data(ParseSplat))
@@ -209,8 +233,9 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 			const uint8* B1 = SplatPtr + Parser.rot_banks[b * 4 + 1].offset;
 			const uint8* B2 = SplatPtr + Parser.rot_banks[b * 4 + 2].offset;
 			const uint8* B3 = SplatPtr + Parser.rot_banks[b * 4 + 3].offset;
+			const FQuat4f RawQuat(*(float*)B1, *(float*)B2, *(float*)B3, *(float*)B0);
 			RotBankData[i * PLYMetadata.num_rot_banks + b] =
-				FQuat4f(*(float*)B1, *(float*)B2, *(float*)B3, *(float*)B0);
+				SafeNormalizedQuat(FQuat4f(-RawQuat.Z, -RawQuat.X, RawQuat.Y, RawQuat.W));
 		}
 		for (int32 b = 0; b < PLYMetadata.num_dc_banks; ++b)
 		{
@@ -227,6 +252,19 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 			const uint8* MuPtr = SplatPtr + Parser.layout.at(Property::LifetimeMu).offset;
 			const uint8* WPtr = SplatPtr + Parser.layout.at(Property::LifetimeW).offset;
 			LifetimeData[i] = FVector2f(*(float*)MuPtr, *(float*)WPtr);
+		}
+		const int32 NumTriplets = PLYMetadata.num_sh_triplets;
+		for (int32 t = 0; t < NumTriplets; ++t)
+		{
+			// GSplatData/PlayCanvas style layout:
+			// f_rest_0..14   -> R channel coeffs
+			// f_rest_15..29  -> G channel coeffs
+			// f_rest_30..44  -> B channel coeffs
+			const uint8* C0 = SplatPtr + Parser.sh_rest[t].offset;
+			const uint8* C1 = SplatPtr + Parser.sh_rest[t + NumTriplets].offset;
+			const uint8* C2 = SplatPtr + Parser.sh_rest[t + NumTriplets * 2].offset;
+			SHCoefficients[i * NumTriplets + t] =
+				FVector3f(*(float*)C0, *(float*)C1, *(float*)C2);
 		}
 
 		SplatPtr += Parser.splat_size;
@@ -247,8 +285,7 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	{
 		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
 		{
-			const FQuat4f Src = SafeNormalizedQuat(RotBankData[i * PLYMetadata.num_rot_banks]);
-			Rotations[i] = SafeNormalizedQuat(FQuat4f(-Src.Z, -Src.X, Src.Y, Src.W));
+			Rotations[i] = SafeNormalizedQuat(RotBankData[i * PLYMetadata.num_rot_banks]);
 		}
 	}
 	if (PLYMetadata.num_dc_banks > 0)
@@ -256,18 +293,18 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
 		{
 			const FVector3f& DC0 = DCBankData[i * PLYMetadata.num_dc_banks];
-			const uint8 BaseAlpha = Colors[i].A;
-			Colors[i] = FColor(
-				to_color_linear(DC0.X),
-				to_color_linear(DC0.Y),
-				to_color_linear(DC0.Z),
+			const float BaseAlpha = Colors[i].W;
+			Colors[i] = FVector4f(
+				to_color_srgb_float(DC0.X),
+				to_color_srgb_float(DC0.Y),
+				to_color_srgb_float(DC0.Z),
 				BaseAlpha);
 		}
 	}
 
 	if (PLYMetadata.num_splats > 0)
 	{
-		const FColor& ImportedColor0 = Colors[0];
+		const FVector4f& ImportedColor0 = Colors[0];
 		float RawOpacity0 = 0.0f;
 		if (PLYMetadata.properties.contains(Property::Opacity))
 		{
@@ -279,15 +316,15 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		{
 			const FVector3f& DC0 = DCBankData[0];
 			EASYTIME_LOGL(
-				"[4D Import DC0] Raw=(%.6f, %.6f, %.6f) OpacityRaw=%.6f -> Color=(%d,%d,%d,%d)",
+				"[4D Import DC0] Raw=(%.6f, %.6f, %.6f) OpacityRaw=%.6f -> Color=(%.6f,%.6f,%.6f,%.6f)",
 				DC0.X,
 				DC0.Y,
 				DC0.Z,
 				RawOpacity0,
-				(int32)ImportedColor0.R,
-				(int32)ImportedColor0.G,
-				(int32)ImportedColor0.B,
-				(int32)ImportedColor0.A);
+				ImportedColor0.X,
+				ImportedColor0.Y,
+				ImportedColor0.Z,
+				ImportedColor0.W);
 
 			if (PLYMetadata.num_dc_banks > 1)
 			{
@@ -302,12 +339,58 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		else
 		{
 			EASYTIME_LOGL(
-				"[4D Import DC] No dc_bank found. OpacityRaw=%.6f BaseColor0=(%d,%d,%d,%d)",
+				"[4D Import DC] No dc_bank found. OpacityRaw=%.6f BaseColor0=(%.6f,%.6f,%.6f,%.6f)",
 				RawOpacity0,
-				(int32)ImportedColor0.R,
-				(int32)ImportedColor0.G,
-				(int32)ImportedColor0.B,
-				(int32)ImportedColor0.A);
+				ImportedColor0.X,
+				ImportedColor0.Y,
+				ImportedColor0.Z,
+				ImportedColor0.W);
+		}
+
+		if (PLYMetadata.num_sh_triplets > 0)
+		{
+			const FVector3f& SH0 = SHCoefficients[0];
+			EASYTIME_LOGL(
+				"[4D Import SH0] Raw=(%.6f, %.6f, %.6f) triplets=%d",
+				SH0.X,
+				SH0.Y,
+				SH0.Z,
+				PLYMetadata.num_sh_triplets);
+			if (PLYMetadata.num_sh_triplets >= 3)
+			{
+				const FVector3f& SH1 = SHCoefficients[1];
+				const FVector3f& SH2 = SHCoefficients[2];
+				EASYTIME_LOGL(
+					"[4D Import SH1-2] Raw1=(%.6f, %.6f, %.6f) Raw2=(%.6f, %.6f, %.6f)",
+					SH1.X,
+					SH1.Y,
+					SH1.Z,
+					SH2.X,
+					SH2.Y,
+					SH2.Z);
+			}
+		}
+
+		if (PLYMetadata.num_rot_banks > 0)
+		{
+			const FQuat4f& R0 = RotBankData[0];
+			EASYTIME_LOGL(
+				"[4D Import Rot0] UEQuat=(%.6f, %.6f, %.6f, %.6f)",
+				R0.X,
+				R0.Y,
+				R0.Z,
+				R0.W);
+
+			if (PLYMetadata.num_rot_banks > 1)
+			{
+				const FQuat4f& R1 = RotBankData[1];
+				EASYTIME_LOGL(
+					"[4D Import Rot1] UEQuat=(%.6f, %.6f, %.6f, %.6f)",
+					R1.X,
+					R1.Y,
+					R1.Z,
+					R1.W);
+			}
 		}
 	}
 
@@ -320,9 +403,10 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	{
 		const FVector3f& P0 = Positions[0];
 		const FQuat4f& Q0 = Rotations[0];
-		const FColor& C0 = Colors[0];
+		const FVector3f& S0 = Scales[0];
+		const FVector4f& C0 = Colors[0];
 		EASYTIME_LOGL(
-			"[4D Import Base0] P=(%.3f,%.3f,%.3f) Q=(%.3f,%.3f,%.3f,%.3f) C=(%d,%d,%d,%d)",
+			"[4D Import Base0] P=(%.3f,%.3f,%.3f) Q=(%.3f,%.3f,%.3f,%.3f) S=(%.6f,%.6f,%.6f) C=(%.6f,%.6f,%.6f,%.6f)",
 			P0.X,
 			P0.Y,
 			P0.Z,
@@ -330,10 +414,13 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 			Q0.Y,
 			Q0.Z,
 			Q0.W,
-			(int32)C0.R,
-			(int32)C0.G,
-			(int32)C0.B,
-			(int32)C0.A);
+			S0.X,
+			S0.Y,
+			S0.Z,
+			C0.X,
+			C0.Y,
+			C0.Z,
+			C0.W);
 	}
 
 	FVector3f QuantMin = Positions.Num() > 0
@@ -377,6 +464,7 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	ResultAsset->SetPositionsMeters(std::move(Positions), QuantMin, QuantMax);
 	ResultAsset->SetCovariancesQuatScaleMeters(Rotations, Scales);
 	ResultAsset->SetColorsLinear(std::move(Colors));
+	ResultAsset->SetSHCoefficients(std::move(SHCoefficients), PLYMetadata.num_sh_triplets);
 
 	if (!GenerateConvexHull4D(
 			ResultAsset->GetPositions(),

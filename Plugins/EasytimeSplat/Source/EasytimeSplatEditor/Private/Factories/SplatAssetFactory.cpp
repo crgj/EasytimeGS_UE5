@@ -118,27 +118,79 @@ UObject* USplatAssetFactory::FactoryCreateBinary(
 		return nullptr;
 	}
 
+	EASYTIME_LOGL(
+		"[3D Import] splats=%d shTriplets=%d",
+		(int32)PLYMetadata.num_splats,
+		PLYMetadata.num_sh_triplets);
+
 	TArray<FVector3f> Positions;
 	Positions.SetNumUninitialized(PLYMetadata.num_splats);
 	TArray<FQuat4f> Rotations;
 	Rotations.SetNumUninitialized(PLYMetadata.num_splats);
 	TArray<FVector3f> Scales;
 	Scales.SetNumUninitialized(PLYMetadata.num_splats);
-	TArray<FColor> Colors;
+	TArray<FVector4f> Colors;
 	Colors.SetNumUninitialized(PLYMetadata.num_splats);
+	TArray<FVector3f> SHCoefficients;
+	SHCoefficients.SetNumUninitialized(PLYMetadata.num_splats * PLYMetadata.num_sh_triplets);
 
 	ParseSplatFn ParseSplat =
 		[P = std::span<FVector3f>(&Positions[0], Positions.Num()),
 	     R = std::span<FQuat4f>(&Rotations[0], Rotations.Num()),
 	     S = std::span<FVector3f>(&Scales[0], Scales.Num()),
-	     C = std::span<FColor>(&Colors[0], Colors.Num())](
+	     C = std::span<FVector4f>(&Colors[0], Colors.Num())](
 			uint32_t Index, GetPropertyFn Get)
-	{ ply::convert_splat<FVector3f, FQuat4f, FColor>(Index, Get, P, R, S, C); };
+	{
+		P[Index] = FVector3f(
+			to<float>(Get(Property::Z)),
+			to<float>(Get(Property::X)),
+			-to<float>(Get(Property::Y)));
+
+		const float X = -to<float>(Get(Property::RotationZ));
+		const float Y = -to<float>(Get(Property::RotationX));
+		const float Z = to<float>(Get(Property::RotationY));
+		const float W = to<float>(Get(Property::RotationW));
+		const float Len = FMath::Max(FMath::Sqrt(X * X + Y * Y + Z * Z + W * W), KINDA_SMALL_NUMBER);
+		R[Index] = FQuat4f(X / Len, Y / Len, Z / Len, W / Len);
+
+		S[Index] = FVector3f(
+			to_scale_linear(Get(Property::ScaleZ)),
+			to_scale_linear(Get(Property::ScaleX)),
+			to_scale_linear(Get(Property::ScaleY)));
+
+		C[Index] = FVector4f(
+			to_color_srgb_float(Get(Property::DCRed)),
+			to_color_srgb_float(Get(Property::DCGreen)),
+			to_color_srgb_float(Get(Property::DCBlue)),
+			to_alpha_linear_float(Get(Property::Opacity)));
+	};
 
 	if (!Parser.parse_data(ParseSplat))
 	{
 		EASYTIME_LOGE("Failed to parse splats from %s.", *InName.ToString());
 		return nullptr;
+	}
+
+	if (PLYMetadata.num_sh_triplets > 0)
+	{
+		const uint8* SplatPtr = reinterpret_cast<const uint8*>(Parser.buffer.data());
+		const int32 NumTriplets = PLYMetadata.num_sh_triplets;
+		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
+		{
+			for (int32 t = 0; t < NumTriplets; ++t)
+			{
+				// GSplatData/PlayCanvas style layout:
+				// f_rest_0..14   -> R channel coeffs
+				// f_rest_15..29  -> G channel coeffs
+				// f_rest_30..44  -> B channel coeffs
+				const uint8* C0 = SplatPtr + Parser.sh_rest[t].offset;
+				const uint8* C1 = SplatPtr + Parser.sh_rest[t + NumTriplets].offset;
+				const uint8* C2 = SplatPtr + Parser.sh_rest[t + NumTriplets * 2].offset;
+				SHCoefficients[i * NumTriplets + t] =
+					FVector3f(*(float*)C0, *(float*)C1, *(float*)C2);
+			}
+			SplatPtr += Parser.splat_size;
+		}
 	}
 	
 	USplatAsset* ResultAsset = NewObject<USplatAsset>(InParent, InName, Flags);
@@ -147,6 +199,7 @@ UObject* USplatAssetFactory::FactoryCreateBinary(
 	ResultAsset->SetPositionsMeters(std::move(Positions));
 	ResultAsset->SetCovariancesQuatScaleMeters(Rotations, Scales);
 	ResultAsset->SetColorsLinear(std::move(Colors));
+	ResultAsset->SetSHCoefficients(std::move(SHCoefficients), PLYMetadata.num_sh_triplets);
 
 	if (!GenerateConvexHull(
 			ResultAsset->PositionsFullPrecision,

@@ -32,13 +32,16 @@ FSplatSceneProxy::FSplatSceneProxy(USplatComponent& Component)
 {
 	bIs4D = Cast<USplat4DAsset>(Asset) != nullptr;
 	bUse4DInterpolation = bIs4D;
+	SelectedSHDegree = FMath::Min<uint32>(Component.GetMaxSHDegree(), Asset ? Asset->GetAvailableSHDegree() : 0);
 	EASYTIME_LOGL(
-		"[SceneProxy Ctor] Name=%s Is4D=%d Use4DInterp=%d NumSplats=%u SortGPU=%d",
+		"[SceneProxy Ctor] Name=%s Is4D=%d Use4DInterp=%d NumSplats=%u SortGPU=%d SHDegree=%u SHTriplets=%u",
 		*GetResourceName().ToString(),
 		bIs4D ? 1 : 0,
 		bUse4DInterpolation ? 1 : 0,
 		Asset ? Asset->GetNumSplats() : 0,
-		bIsSortingOnGPU ? 1 : 0);
+		bIsSortingOnGPU ? 1 : 0,
+		SelectedSHDegree,
+		Asset ? Asset->GetNumSHTriplets() : 0);
 
 	if (bIsSortingOnGPU)
 	{

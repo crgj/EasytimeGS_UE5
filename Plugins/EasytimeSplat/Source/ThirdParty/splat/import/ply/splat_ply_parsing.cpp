@@ -4,8 +4,11 @@
 
 #include "splat_ply_parsing.h"
 
+#include <algorithm>
 #include <bit>
 #include <charconv>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -364,6 +367,7 @@ bool SplatParserPly::parse_header() {
         return false;
       }
       
+      const size_t property_offset = splat_size;
       bool matched = false;
       if (property_map.contains(*token)) {
         Property prop = property_map.at(*token);
@@ -375,31 +379,38 @@ bool SplatParserPly::parse_header() {
         }
       }
       
-      // Dynamic Bank Recognition
-      if (!matched) {
-        std::string name(token->data(), token->size());
-        auto check_bank = [&](const std::string& prefix, std::vector<BankPropertyDesc>& destination) {
-          if (name.find(prefix) == 0) {
-            size_t last_underscore = name.find_last_of('_');
-            if (last_underscore != std::string::npos) {
-              std::string bank_num_str = name.substr(prefix.size(), last_underscore - prefix.size());
-              int32_t bank_idx = std::atoi(bank_num_str.c_str());
-              destination.push_back({bank_idx, splat_size, type});
-              return true;
-            }
+      std::string name(token->data(), token->size());
+      auto append_bank = [&](const std::string& prefix, std::vector<BankPropertyDesc>& destination) {
+        if (name.find(prefix) == 0) {
+          size_t last_underscore = name.find_last_of('_');
+          if (last_underscore != std::string::npos) {
+            std::string bank_num_str =
+                name.substr(prefix.size(), last_underscore - prefix.size());
+            int32_t bank_idx = std::atoi(bank_num_str.c_str());
+            destination.push_back({bank_idx, property_offset, type});
+            return true;
           }
-          return false;
-        };
+        }
+        return false;
+      };
 
-        if (check_bank("xyz_bank_", xyz_banks)) {
+      bool is_dynamic_bank = false;
+      is_dynamic_bank |= append_bank("xyz_bank_", xyz_banks);
+      is_dynamic_bank |= append_bank("rot_bank_", rot_banks);
+      is_dynamic_bank |= append_bank("f_dc_bank_", dc_banks);
+      if (name.find("f_rest_") == 0) {
+        std::string coeff_idx_str = name.substr(strlen("f_rest_"));
+        int32_t coeff_idx = std::atoi(coeff_idx_str.c_str());
+        sh_rest.push_back({coeff_idx, property_offset, type});
+        is_dynamic_bank = true;
+      }
+
+      if (is_dynamic_bank)
+      {
+        matched = true;
+        if (!property_map.contains(*token))
+        {
           splat_size += type_size_map.at(type);
-          matched = true;
-        } else if (check_bank("rot_bank_", rot_banks)) {
-          splat_size += type_size_map.at(type);
-          matched = true;
-        } else if (check_bank("f_dc_bank_", dc_banks)) {
-          splat_size += type_size_map.at(type);
-          matched = true;
         }
       }
 
@@ -457,6 +468,13 @@ bool SplatParserPly::parse_metadata(std::span<const uint8_t> ply_buffer,
   metadata.num_xyz_banks = (int32_t)xyz_banks.size() / 3;
   metadata.num_rot_banks = (int32_t)rot_banks.size() / 4;
   metadata.num_dc_banks = (int32_t)dc_banks.size() / 3;
+  std::sort(
+      sh_rest.begin(),
+      sh_rest.end(),
+      [](const BankPropertyDesc& a, const BankPropertyDesc& b) {
+        return a.bank_index < b.bank_index;
+      });
+  metadata.num_sh_triplets = (int32_t)sh_rest.size() / 3;
 
   return true;
 }

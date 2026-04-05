@@ -85,6 +85,7 @@ struct Metadata {
   int32_t num_xyz_banks = 0;
   int32_t num_rot_banks = 0;
   int32_t num_dc_banks = 0;
+  int32_t num_sh_triplets = 0;
 };
 
 /**
@@ -125,6 +126,21 @@ inline uint8_t to_color_linear(PropertyType dc) {
   return static_cast<uint8_t>(std::clamp(color_linear * 255.f, 0.f, 255.f));
 }
 
+inline float to_color_srgb_float(float dc_f) {
+  float color_srgb = .5f + .2820948f * dc_f;
+  return std::clamp(color_srgb, 0.0f, 1.0f);
+}
+
+inline float to_color_srgb_float(PropertyType dc) {
+  return to_color_srgb_float(to<float>(dc));
+}
+
+inline float to_color_linear_float(PropertyType dc) {
+  float dc_f = to<float>(dc);
+  float color_srgb = .5f + .2820948f * dc_f;
+  return std::clamp(std::pow(std::max(color_srgb, 0.0f), 2.2f), 0.0f, 1.0f);
+}
+
 /**
  * Convert opacity extracted from a 3DGS file to an 8-bit alpha value.
  * Assumes an inverse logistic encoding (https://en.wikipedia.org/wiki/Logit).
@@ -136,6 +152,11 @@ inline uint8_t to_alpha_linear(PropertyType opacity) {
   float opacity_f = to<float>(opacity);
   return static_cast<uint8_t>(
       std::clamp(1.f / (1.f + exp(-opacity_f)) * 255.f, 0.f, 255.f));
+}
+
+inline float to_alpha_linear_float(PropertyType opacity) {
+  float opacity_f = to<float>(opacity);
+  return std::clamp(1.f / (1.f + exp(-opacity_f)), 0.f, 1.f);
 }
 
 /**

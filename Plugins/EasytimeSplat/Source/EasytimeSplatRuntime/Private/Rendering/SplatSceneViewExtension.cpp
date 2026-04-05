@@ -32,12 +32,15 @@ SetSharedParameters(const FSceneView& View, FSplatSceneProxy* Proxy)
 	Params.View = View.ViewUniformBuffer;
 	Params.InstancedView = View.GetInstancedViewUniformBuffer();
 	Params.local_to_world = FMatrix44f(Proxy->GetLocalToWorld());
+	Params.sh_degree = Proxy->GetSelectedSHDegree();
+	Params.sh_num_triplets = Proxy->GetNumSHTriplets();
 	FVector3f PosMinCM, PosScaleCM;
 	Params.Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	Params.Positions.pos_min_cm = PosMinCM;
 	Params.Positions.pos_scale_cm = PosScaleCM;
 	Params.transforms = Proxy->GetTransformsSRV();
 	Params.colors = Proxy->GetColorsSRV();
+	Params.sh_coefficients = Proxy->GetSHCoefficientsSRV();
 
 	return Params;
 }

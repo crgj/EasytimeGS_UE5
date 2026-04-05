@@ -73,6 +73,24 @@ void USplatComponent::GetUsedMaterials(
 		OutMaterials.Add(GEngine->WireframeMaterial);
 	}
 }
+
+void USplatComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	if (PropertyChangedEvent.Property &&
+		PropertyChangedEvent.Property->GetFName() == GET_MEMBER_NAME_CHECKED(USplatComponent, MaxSHDegree))
+	{
+		EASYTIME_LOGL(
+			"[SplatComponent] MaxSHDegree changed to %d on %s",
+			MaxSHDegree,
+			*GetNameSafe(this));
+		RecreateRenderState_Concurrent();
+		return;
+	}
+
+	MarkRenderStateDirty();
+}
 #endif
 
 FBoxSphereBounds

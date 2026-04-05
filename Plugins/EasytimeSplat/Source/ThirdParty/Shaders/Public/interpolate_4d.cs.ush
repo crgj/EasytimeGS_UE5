@@ -121,14 +121,26 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     }
     float4 r0 = rot_bank[i * num_rot_banks + k_rot_0];
     float4 r1 = rot_bank[i * num_rot_banks + k_rot_1];
-    float4 r_interp = normalize(lerp(r0, r1, alpha_rot)); // Cheap Nlerp
+    // Quaternion shortest-path interpolation: q and -q represent same rotation.
+    // Without this, interpolation may flip through the long arc and explode.
+    if (dot(r0, r1) < 0.0f)
+    {
+        r1 = -r1;
+    }
+    float4 r_interp = normalize(lerp(r0, r1, alpha_rot)); // NLerp (shortest arc)
     
-    // Swapping handedness for rotation (same as C++ convert_splat)
-    float qx = -r_interp.z;
-    float qy = -r_interp.x;
-    float qz = r_interp.y;
+    // rot_bank is already converted to UE basis during import.
+    // Do NOT swizzle again here, otherwise rotation is applied twice.
+    float qx = r_interp.x;
+    float qy = r_interp.y;
+    float qz = r_interp.z;
     float qw = r_interp.w;
-    // ... normalize q ...
+    float q_len2 = max(qx * qx + qy * qy + qz * qz + qw * qw, 1e-12f);
+    float q_inv_len = rsqrt(q_len2);
+    qx *= q_inv_len;
+    qy *= q_inv_len;
+    qz *= q_inv_len;
+    qw *= q_inv_len;
     
     // Compute Covariance Sigma = R * S * S^T * R^T
     float3 s = scales[i] * 100.0f; // CM

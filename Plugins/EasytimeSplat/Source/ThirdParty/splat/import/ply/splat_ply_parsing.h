@@ -55,6 +55,7 @@ class SplatParserPly final : public ISplatParser {
   std::vector<BankPropertyDesc> xyz_banks;
   std::vector<BankPropertyDesc> rot_banks;
   std::vector<BankPropertyDesc> dc_banks;
+  std::vector<BankPropertyDesc> sh_rest;
   
   int32_t total_frames = 0;
   int32_t xyz_stride = 0;

@@ -73,10 +73,25 @@ public:
 		return CovariancesCM->ShaderResourceViewRHI;
 	}
 
+	FShaderResourceViewRHIRef GetSHCoefficientsSRV() const
+	{
+		check(SHCoefficients);
+		check(SHCoefficients->ShaderResourceViewRHI);
+		return SHCoefficients->ShaderResourceViewRHI;
+	}
+
 	/**
 	 * @return The number of splats in this asset.
 	 */
 	uint32 GetNumSplats() const { return NumSplats; }
+	uint32 GetNumSHTriplets() const { return NumSHTriplets; }
+	uint32 GetAvailableSHDegree() const
+	{
+		if (NumSHTriplets >= 15) return 3;
+		if (NumSHTriplets >= 8) return 2;
+		if (NumSHTriplets >= 3) return 1;
+		return 0;
+	}
 
 	/**
 	 * @return Constant view of this asset's positions.
@@ -103,21 +118,43 @@ public:
 		return Positions->ShaderResourceViewRHI;
 	}
 
-#if WITH_EDITOR
+	void SetSHCoefficients(TArray<FVector3f>&& InSHCoefficients, uint32 InNumSHTriplets)
+	{
+		check(
+			InSHCoefficients.Num() == 0 ||
+			InSHCoefficients.Num() == static_cast<int32>(NumSplats * InNumSHTriplets));
+
+		NumSHTriplets = InNumSHTriplets;
+
+		TStaticMeshVertexData<FVector3f> Data;
+		if (InSHCoefficients.Num() > 0)
+		{
+			Data.Assign(InSHCoefficients);
+		}
+		else
+		{
+			Data.ResizeBuffer(1);
+			reinterpret_cast<FVector3f*>(Data.GetDataPointer())[0] =
+				FVector3f::ZeroVector;
+		}
+		SHCoefficients = Easytime::Splat::TSplatStaticBuffer(std::move(Data));
+	}
+
 	/**
 	 * Populates this asset with the given colors.
 	 *
-	 * @param ColorsLinear - Array of linear, 8-bit-per-channel colors.
+	 * @param ColorsLinear - Array of linear float colors in RGBA.
 	 */
-	void SetColorsLinear(TArray<FColor>&& ColorsLinear)
+	void SetColorsLinear(TArray<FVector4f>&& ColorsLinear)
 	{
 		check(ColorsLinear.Num() == NumSplats);
 
-		TStaticMeshVertexData<FColor> Data;
+		TStaticMeshVertexData<FVector4f> Data;
 		Data.Assign(ColorsLinear);
 		Colors = Easytime::Splat::TSplatStaticBuffer(std::move(Data));
 	}
 
+#if WITH_EDITOR
 	/**
 	 * Populates this asset with covariance matrices describing the given
 	 * rotations and scales.
@@ -190,7 +227,9 @@ private:
 		Positions;
 	std::optional<Easytime::Splat::TSplatStaticBuffer<Easytime::Splat::FPackedCovMat>>
 		CovariancesCM;
-	std::optional<Easytime::Splat::TSplatStaticBuffer<FColor>> Colors;
+	std::optional<Easytime::Splat::TSplatStaticBuffer<FVector4f>> Colors;
+	std::optional<Easytime::Splat::TSplatStaticBuffer<FVector3f>> SHCoefficients;
+	uint32 NumSHTriplets = 0;
 
 	TArray<FVector3f> ConvexHullVertices;
 	TArray<uint32> ConvexHullIndices;

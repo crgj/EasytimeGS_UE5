@@ -110,9 +110,12 @@ SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 SHADER_PARAMETER_STRUCT_REF(
 	FInstancedViewUniformShaderParameters, InstancedView)
 SHADER_PARAMETER(FMatrix44f, local_to_world)
+SHADER_PARAMETER(uint32, sh_degree)
+SHADER_PARAMETER(uint32, sh_num_triplets)
 SHADER_PARAMETER_STRUCT_INCLUDE(FPackedPositionParameters, Positions)
 SHADER_PARAMETER_SRV(Buffer<float4>, transforms)
 SHADER_PARAMETER_SRV(Buffer<float4>, colors)
+SHADER_PARAMETER_SRV(Buffer<float3>, sh_coefficients)
 END_SHADER_PARAMETER_STRUCT()
 
 // WDD-2026-04-05 01:00 用rdg_前缀避免与FPackedPositionParameters同名字段的运行时绑定冲突

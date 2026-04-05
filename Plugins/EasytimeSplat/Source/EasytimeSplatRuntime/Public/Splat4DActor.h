@@ -21,12 +21,25 @@ public:
 	ASplat4DActor();
 
 	/** Current animation frame for 4D interpolation. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat4D", meta = (ClampMin = "0", UIMin = "0", Delta = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat 4D", meta = (ClampMin = "0", UIMin = "0", Delta = "1"))
 	int32 CurrentFrame = 0;
 
 	/** Auto-play one frame every 1/30 second. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat4D", meta = (DisplayName = "IsPlay"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat 4D", meta = (DisplayName = "IsPlay"))
 	bool bIsPlay = false;
+
+	/** Maximum spherical harmonic order to evaluate. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Splat 4D",
+		meta = (
+			ClampMin = "0",
+			ClampMax = "3",
+			UIMin = "0",
+			UIMax = "3",
+			ToolTip = "0 = DC only, 1 = SH1, 2 = SH2, 3 = SH3. The runtime will clamp to the highest order actually stored in the asset."))
+	int32 MaxSHDegree = 3;
 
 	virtual void Tick(float DeltaTime) override;
 	virtual bool ShouldTickIfViewportsOnly() const override { return true; }
@@ -41,7 +54,7 @@ public:
 
 private:
 	void ClampCurrentFrameToAsset();
-	void SyncFrameToComponent(bool bMarkRenderStateDirty);
+	void SyncPropertiesToComponent(bool bRecreateRenderState);
 
 	float PlaybackAccumulator = 0.0f;
 };

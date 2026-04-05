@@ -7,11 +7,39 @@
 #include "SplatSettings.h"
 
 #include "RHIResources.h"
+#include "Serialization/CustomVersion.h"
 
 using Easytime::Splat::FPackedCovMat;
 using Easytime::Splat::FPackedPos;
 using Easytime::Splat::MetersToCentimeters;
 using Easytime::Splat::TSplatStaticBuffer;
+
+namespace
+{
+struct FSplatAssetCustomVersion
+{
+	static const FGuid GUID;
+
+	enum Type : int32
+	{
+		BeforeCustomVersionWasAdded = 0,
+		AddedSHCoefficients,
+		AddedFloatColors,
+		LatestVersion = AddedFloatColors
+	};
+};
+
+const FGuid FSplatAssetCustomVersion::GUID(
+	0xC90F0AF3,
+	0x4D9E4A31,
+	0x9D9A6F4C,
+	0x1C3B8B1E);
+
+FCustomVersionRegistration GRegisterSplatAssetCustomVersion(
+	FSplatAssetCustomVersion::GUID,
+	FSplatAssetCustomVersion::LatestVersion,
+	TEXT("SplatAssetCustomVersion"));
+} // namespace
 
 void USplatAsset::BeginDestroy()
 {
@@ -30,6 +58,10 @@ void USplatAsset::BeginDestroy()
 	{
 		BeginReleaseResource(&*Colors);
 	}
+	if (SHCoefficients)
+	{
+		BeginReleaseResource(&*SHCoefficients);
+	}
 
 	ReleaseResourcesFence.BeginFence();
 }
@@ -39,6 +71,7 @@ void USplatAsset::BeginInit()
 	check(Positions);
 	check(CovariancesCM);
 	check(Colors);
+	check(SHCoefficients);
 
 	FName Name = FName(GetPathName());
 
@@ -48,6 +81,8 @@ void USplatAsset::BeginInit()
 	BeginInitResource(&*CovariancesCM);
 	Colors->SetOwnerName(Name);
 	BeginInitResource(&*Colors);
+	SHCoefficients->SetOwnerName(Name);
+	BeginInitResource(&*SHCoefficients);
 }
 
 bool USplatAsset::IsReadyForFinishDestroy()
@@ -70,12 +105,18 @@ void USplatAsset::PostLoad()
 	}
 #endif
 
+	if (!SHCoefficients && NumSplats > 0)
+	{
+		SetSHCoefficients(TArray<FVector3f>{}, 0);
+	}
+
 	BeginInit();
 }
 
 void USplatAsset::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
+	Ar.UsingCustomVersion(FSplatAssetCustomVersion::GUID);
 
 	Ar << NumSplats;
 
@@ -85,7 +126,41 @@ void USplatAsset::Serialize(FArchive& Ar)
 	if (NumSplats > 0)
 	{
 		Ar << PositionsFullPrecision;
-		Ar << CovariancesCM << Colors;
+		const int32 Version = Ar.CustomVer(FSplatAssetCustomVersion::GUID);
+		Ar << CovariancesCM;
+		if (Ar.IsSaving() || Version >= FSplatAssetCustomVersion::AddedFloatColors)
+		{
+			Ar << Colors;
+		}
+		else
+		{
+			TStaticMeshVertexData<FColor> LegacyColorData;
+			LegacyColorData.Serialize(Ar);
+
+			TArray<FVector4f> ConvertedColors;
+			ConvertedColors.SetNumUninitialized(NumSplats);
+			const FColor* LegacyPtr =
+				reinterpret_cast<const FColor*>(LegacyColorData.GetDataPointer());
+			for (uint32 Index = 0; Index < NumSplats; ++Index)
+			{
+				const FLinearColor Linear = LegacyPtr[Index].ReinterpretAsLinear();
+				ConvertedColors[Index] = FVector4f(
+					Linear.R,
+					Linear.G,
+					Linear.B,
+					Linear.A);
+			}
+			SetColorsLinear(std::move(ConvertedColors));
+		}
+		if (Ar.IsSaving() ||
+			Version >= FSplatAssetCustomVersion::AddedSHCoefficients)
+		{
+			Ar << NumSHTriplets << SHCoefficients;
+		}
+		else
+		{
+			NumSHTriplets = 0;
+		}
 		Ar << ConvexHullVertices << ConvexHullIndices;
 	}
 }

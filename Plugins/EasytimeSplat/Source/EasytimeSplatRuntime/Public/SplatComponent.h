@@ -49,6 +49,18 @@ public:
 	 * @return The asset attached to this component, or nullptr.
 	 */
 	TObjectPtr<USplatAsset> GetAsset() const { return Asset; }
+	int32 GetMaxSHDegree() const { return MaxSHDegree; }
+	void SetMaxSHDegree(int32 InMaxSHDegree)
+	{
+		const int32 Clamped = FMath::Clamp(InMaxSHDegree, 0, 3);
+		if (MaxSHDegree == Clamped)
+		{
+			return;
+		}
+
+		MaxSHDegree = Clamped;
+		MarkRenderStateDirty();
+	}
 
 	/**
 	 * Sets the asset and refreshes render/collision state.
@@ -70,9 +82,24 @@ public:
 		MarkRenderStateDirty();
 	}
 
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 private:
 	UPROPERTY(Category = Splat, EditAnywhere)
 	TObjectPtr<USplatAsset> Asset;
+
+	UPROPERTY(
+		EditAnywhere,
+		Category = Splat,
+		meta = (
+			ClampMin = "0",
+			ClampMax = "3",
+			UIMin = "0",
+			UIMax = "3",
+			ToolTip = "0 = DC only, 1 = SH1, 2 = SH2, 3 = SH3. The runtime will clamp to the highest order actually stored in the asset."))
+	int32 MaxSHDegree = 3;
 
 	UPROPERTY()
 	TObjectPtr<UBodySetup> BodySetup;
