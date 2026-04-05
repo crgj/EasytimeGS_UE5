@@ -1,0 +1,70 @@
+/*
+  Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
+*/
+
+/**
+ * Required headers:
+ * - constants.hlsl
+ * - unpacking.hlsl
+ *
+ * Required shaders constants:
+ * - local_to_view
+ * - two_focal_length
+ * - num_splats
+ * - pos_scale_cm
+ * - pos_min_cm
+ */
+
+Buffer<uint> positions;
+Buffer<uint2> covariances;
+RWBuffer<float4> transforms;
+
+/**
+ * Calculate a 2x2 transform for projecting a splat into screen space.
+ *
+ * @param dispatch_thread_id - The x component is 1:1 with the index of the splat
+ * that is transformed.
+ */
+[numthreads(THREAD_GROUP_SIZE_X, 1, 1)] void main(
+    uint3 dispatch_thread_id : SV_DispatchThreadID) {
+  uint splat_id = dispatch_thread_id.x;
+
+  if (splat_id >= num_splats) {
+    return;
+  }
+
+  float4 pos_local = unpack_pos(positions[splat_id], pos_scale_cm, pos_min_cm);
+  float3 pos_view = mul(pos_local, local_to_view);
+
+  float3x3 sig = unpack_cov_mat(covariances[splat_id]);
+
+  float3x3 W = float3x3(local_to_view[0].xyz, local_to_view[1].xyz,
+                        local_to_view[2].xyz);
+
+  float scale_x = -pos_view.x / pos_view.z;
+  float scale_y = -pos_view.y / pos_view.z;
+
+  float3 jw_0 = float3(W[0][0] + scale_x * W[0][2], W[1][0] + scale_x * W[1][2],
+                       W[2][0] + scale_x * W[2][2]);
+
+  float3 jw_1 = float3(W[0][1] + scale_y * W[0][2], W[1][1] + scale_y * W[1][2],
+                       W[2][1] + scale_y * W[2][2]);
+
+  float3 jw_sig_0 = mul(jw_0, sig);
+  float3 jw_sig_1 = mul(jw_1, sig);
+
+  float sig_p_00 = mul(jw_sig_0, jw_0);
+  float sig_p_01_10 = mul(jw_sig_0, jw_1);
+  float sig_p_11 = mul(jw_sig_1, jw_1);
+
+  float det = sig_p_00 * sig_p_11 - sig_p_01_10 * sig_p_01_10;
+  float trace = sig_p_00 + sig_p_11;
+  float sqrt_disc = sqrt(trace * trace - 4 * det);
+  float2 two_lmb = float2(trace + sqrt_disc, trace - sqrt_disc);
+  float2 sqrt_two_sigma = sqrt(two_lmb);
+  float2 v_0 = normalize(float2(sig_p_01_10, two_lmb.x / 2.f - sig_p_00));
+
+  float2 scale = two_focal_length / pos_view.z * sqrt_two_sigma;
+  transforms[splat_id] = half4(v_0.x, -v_0.y, v_0.y, v_0.x) * scale.xyxy;
+}
+

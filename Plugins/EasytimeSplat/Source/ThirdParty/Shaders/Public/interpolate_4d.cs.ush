@@ -1,0 +1,149 @@
+/*
+  Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
+*/
+
+Buffer<float3> xyz_bank;
+Buffer<float4> rot_bank;
+Buffer<float3> dc_bank;
+Buffer<float2> lifetime_mu_w;
+Buffer<float3> scales;
+
+float current_frame;
+uint num_xyz_banks;
+uint num_rot_banks;
+uint num_dc_banks;
+uint xyz_stride;
+uint rot_stride;
+uint dc_stride;
+uint num_splats;
+float3 pos_scale_cm;
+float3 pos_min_cm;
+
+RWBuffer<uint> out_positions;
+RWBuffer<uint2> out_covariances;
+RWBuffer<uint> out_colors;
+
+// Simple packing for UNorm
+uint to_unorm(float f, uint bits) {
+    uint max_val = (1u << bits) - 1u;
+    return uint(saturate(f) * float(max_val) + 0.5f);
+}
+
+// Float to custom 5e5/5e6 format (simplified for GPU)
+uint to_custom_float(float f, uint signed_bits, uint exp_bits, uint sig_bits) {
+    // This is a simplified version of ToFloat from PackedTypes.h
+    // For variances/orientations, we just need enough precision
+    if (f == 0.0f) return 0;
+    
+    uint raw = asuint(f);
+    uint sign = (raw >> 31) & signed_bits;
+    int exponent = int((raw >> 23) & 0xFF) - 127;
+    uint mantissa = raw & 0x7FFFFF;
+    
+    int bias = (1 << (exp_bits - 1)) - 1;
+    exponent = clamp(exponent, -bias + 1, bias);
+    uint e_packed = uint(exponent + bias) << sig_bits;
+    uint m_packed = mantissa >> (23 - sig_bits);
+    
+    if (signed_bits > 0) {
+        return (sign << (exp_bits + sig_bits)) | (e_packed & ((1u << (exp_bits + sig_bits)) - 1u)) | m_packed; 
+    }
+    return e_packed | m_packed;
+}
+
+[numthreads(THREAD_GROUP_SIZE_X, 1, 1)]
+void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
+    uint i = dispatch_thread_id.x;
+    if (i >= num_splats) return;
+
+    // 1. Lifetime Gating
+    float2 mu_w = lifetime_mu_w[i];
+    float t_delta = current_frame - mu_w.x;
+    float opacity_multiplier = 1.0f / (1.0f + exp(-mu_w.y * t_delta));
+    
+    // 2. Interpolate XYZ
+    uint k_xyz = uint(current_frame) / max(1u, xyz_stride);
+    float alpha_xyz = frac(current_frame / float(max(1u, xyz_stride)));
+    k_xyz = min(k_xyz, num_xyz_banks - 2);
+    
+    float3 p0 = xyz_bank[i * num_xyz_banks + k_xyz];
+    float3 p1 = xyz_bank[i * num_xyz_banks + k_xyz + 1];
+    float3 p_interp = lerp(p0, p1, alpha_xyz);
+    
+    // Pack Position (Z+ forward, X+ right, Y- up -> X+ forward, Y+ right, Z+ up)
+    float3 p_ue = float3(p_interp.z, p_interp.x, -p_interp.y);
+    float3 p_norm = (p_ue * 100.0f - pos_min_cm) / pos_scale_cm; // pos_scale_cm typically has (PMax-PMin)*100/UNormMax
+    // Wait, pos_scale_cm in C++: PosScaleCM = MetersToCentimeters * (PosMaxM - PosMinM) / FPackedPos::MAX;
+    // So p_norm should be (P_cm - Min_cm) / (Max_cm - Min_cm)
+    // Actually: (P_meters - Min_meters) / (Max_meters - Min_meters)
+    float3 pos_min_m = pos_min_cm / 100.0f;
+    float3 pos_max_m = (pos_scale_cm * 2047.0f / 100.0f) + pos_min_m; // rough estimation
+    // Let's use the exact packing from C++:
+    // (PositionsMeters[Index] - PosMinM) / (PosMaxM - PosMinM)
+    float3 p_rel = saturate((p_ue - pos_min_m) / (pos_max_m - pos_min_m));
+    uint pack_p = (to_unorm(p_rel.z, 10) << 22) | (to_unorm(p_rel.y, 11) << 11) | to_unorm(p_rel.x, 11);
+    out_positions[i] = pack_p;
+
+    // 3. Interpolate Rotation & Scale
+    uint k_rot = uint(current_frame) / max(1u, rot_stride);
+    float alpha_rot = frac(current_frame / float(max(1u, rot_stride)));
+    k_rot = min(k_rot, num_rot_banks - 2);
+    
+    float4 r0 = rot_bank[i * num_rot_banks + k_rot];
+    float4 r1 = rot_bank[i * num_rot_banks + k_rot + 1];
+    float4 r_interp = normalize(lerp(r0, r1, alpha_rot)); // Cheap Nlerp
+    
+    // Swapping handedness for rotation (same as C++ convert_splat)
+    float qx = -r_interp.z;
+    float qy = -r_interp.x;
+    float qz = r_interp.y;
+    float qw = r_interp.w;
+    // ... normalize q ...
+    
+    // Compute Covariance Sigma = R * S * S^T * R^T
+    float3 s = scales[i] * 100.0f; // CM
+    // Construct R matrix
+    float3x3 R;
+    R[0][0] = 1.0f - 2.0f * (qy * qy + qz * qz);
+    R[0][1] = 2.0f * (qx * qy - qz * qw);
+    R[0][2] = 2.0f * (qx * qz + qy * qw);
+    R[1][0] = 2.0f * (qx * qy + qz * qw);
+    R[1][1] = 1.0f - 2.0f * (qx * qx + qz * qz);
+    R[1][2] = 2.0f * (qy * qz - qx * qw);
+    R[2][0] = 2.0f * (qx * qz - qy * qw);
+    R[2][1] = 2.0f * (qy * qz + qx * qw);
+    R[2][2] = 1.0f - 2.0f * (qx * qx + qy * qy);
+    
+    float3x3 S = float3x3(s.x, 0, 0, 0, s.y, 0, 0, 0, s.z);
+    float3x3 RS = mul(R, S);
+    float3x3 Sigma = mul(RS, transpose(RS));
+    
+    // Pack Covariance
+    uint xx = to_custom_float(Sigma[0][0], 0, 5, 5);
+    uint xy = to_custom_float(Sigma[0][1], 1, 5, 5);
+    uint xz = to_custom_float(Sigma[0][2], 1, 5, 5);
+    uint yy = to_custom_float(Sigma[1][1], 0, 5, 5);
+    uint yz = to_custom_float(Sigma[1][2], 1, 5, 5);
+    uint zz = to_custom_float(Sigma[2][2], 0, 5, 6);
+    
+    out_covariances[i] = uint2( (yy << 22) | (yz << 11) | zz, (xx << 22) | (xy << 11) | xz ); // High/Low 32 bit split
+    
+    // 4. Interpolate Color (DC)
+    uint k_dc = uint(current_frame) / max(1u, dc_stride);
+    float alpha_dc = frac(current_frame / float(max(1u, dc_stride)));
+    k_dc = min(k_dc, num_dc_banks - 2);
+    
+    float3 c0 = dc_bank[i * num_dc_banks + k_dc];
+    float3 c1 = dc_bank[i * num_dc_banks + k_dc + 1];
+    float3 c_interp = lerp(c0, c1, alpha_dc);
+    
+    // Convert SH DC to RGB (approx: 0.28209 * SH)
+    float3 rgb = max(0, c_interp * 0.28209479177387814f + 0.5f);
+    uint r8 = to_unorm(rgb.r, 8);
+    uint g8 = to_unorm(rgb.g, 8);
+    uint b8 = to_unorm(rgb.b, 8);
+    uint a8 = to_unorm(opacity_multiplier, 8); // Base opacity is 1.0 from import or bank
+    out_colors[i] = (a8 << 24) | (b8 << 16) | (g8 << 8) | r8;
+}
+
+

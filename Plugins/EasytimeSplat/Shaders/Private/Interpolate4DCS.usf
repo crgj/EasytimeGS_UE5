@@ -1,0 +1,12 @@
+/*
+  Copyright (c) 2025 PICO Technology Co., Ltd. See LICENSE.md.
+*/
+
+#include "/Engine/Public/Platform.ush"
+
+#include "../ThirdParty/Public/constants.ush"
+#include "../ThirdParty/Public/unpacking.ush"
+
+#define THREAD_GROUP_SIZE_X 64
+
+#include "../ThirdParty/Public/interpolate_4d.cs.ush"

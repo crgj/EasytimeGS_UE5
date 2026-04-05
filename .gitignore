@@ -1,0 +1,27 @@
+# Unreal Engine .gitignore
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vscode/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.VC.VC.opendb
+*.VC.VC.db
+*/*.VC.db
+*/*.VC.opendb
+*/*.VC.VC.opendb
+*/*.VC.VC.db
+*.sln.dotsettings.user
+.vs/
+FileOpenOrder/
+!Plugins/*/Source/**/*
+!Plugins/*/Config/**/*
+!Plugins/*/Resources/**/*
+!Plugins/*/Content/**/*
+!Plugins/*/Shaders/**/*
