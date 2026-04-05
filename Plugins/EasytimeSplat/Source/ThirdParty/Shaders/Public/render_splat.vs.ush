@@ -24,6 +24,91 @@ Buffer<uint2> indices;
 Buffer<uint> positions;
 Buffer<half4> transforms;
 Buffer<float4> colors;
+Buffer<float3> sh_coefficients;
+
+uint sh_degree;
+uint sh_num_triplets;
+
+static const float SH_C1 = 0.4886025119029199f;
+static const float SH_C2_0 = 1.0925484305920792f;
+static const float SH_C2_1 = -1.0925484305920792f;
+static const float SH_C2_2 = 0.31539156525252005f;
+static const float SH_C2_3 = -1.0925484305920792f;
+static const float SH_C2_4 = 0.5462742152960396f;
+static const float SH_C3_0 = -0.5900435899266435f;
+static const float SH_C3_1 = 2.890611442640554f;
+static const float SH_C3_2 = -0.4570457994644658f;
+static const float SH_C3_3 = 0.3731763325901154f;
+static const float SH_C3_4 = -0.4570457994644658f;
+static const float SH_C3_5 = 1.445305721320277f;
+static const float SH_C3_6 = -0.5900435899266435f;
+
+float3 eval_sh(uint splat_id, float3 view_dir)
+{
+  if (sh_degree == 0u || sh_num_triplets == 0u)
+  {
+    return 0.0f;
+  }
+
+  uint base_idx = splat_id * sh_num_triplets;
+  float x = view_dir.x;
+  float y = view_dir.y;
+  float z = view_dir.z;
+  float3 result = 0.0f;
+
+  if (sh_num_triplets >= 3u)
+  {
+    float3 sh1 = sh_coefficients[base_idx + 0u];
+    float3 sh2 = sh_coefficients[base_idx + 1u];
+    float3 sh3 = sh_coefficients[base_idx + 2u];
+    result += SH_C1 * (-sh1 * y + sh2 * z - sh3 * x);
+  }
+
+  if (sh_degree >= 2u && sh_num_triplets >= 8u)
+  {
+    float xx = x * x;
+    float yy = y * y;
+    float zz = z * z;
+    float xy = x * y;
+    float yz = y * z;
+    float xz = x * z;
+
+    float3 sh4 = sh_coefficients[base_idx + 3u];
+    float3 sh5 = sh_coefficients[base_idx + 4u];
+    float3 sh6 = sh_coefficients[base_idx + 5u];
+    float3 sh7 = sh_coefficients[base_idx + 6u];
+    float3 sh8 = sh_coefficients[base_idx + 7u];
+
+    result +=
+      sh4 * (SH_C2_0 * xy) +
+      sh5 * (SH_C2_1 * yz) +
+      sh6 * (SH_C2_2 * (2.0f * zz - xx - yy)) +
+      sh7 * (SH_C2_3 * xz) +
+      sh8 * (SH_C2_4 * (xx - yy));
+
+    if (sh_degree >= 3u && sh_num_triplets >= 15u)
+    {
+      float3 sh9 = sh_coefficients[base_idx + 8u];
+      float3 sh10 = sh_coefficients[base_idx + 9u];
+      float3 sh11 = sh_coefficients[base_idx + 10u];
+      float3 sh12 = sh_coefficients[base_idx + 11u];
+      float3 sh13 = sh_coefficients[base_idx + 12u];
+      float3 sh14 = sh_coefficients[base_idx + 13u];
+      float3 sh15 = sh_coefficients[base_idx + 14u];
+
+      result +=
+        sh9  * (SH_C3_0 * y * (3.0f * xx - yy)) +
+        sh10 * (SH_C3_1 * xy * z) +
+        sh11 * (SH_C3_2 * y * (4.0f * zz - xx - yy)) +
+        sh12 * (SH_C3_3 * z * (2.0f * zz - 3.0f * xx - 3.0f * yy)) +
+        sh13 * (SH_C3_4 * x * (4.0f * zz - xx - yy)) +
+        sh14 * (SH_C3_5 * z * (xx - yy)) +
+        sh15 * (SH_C3_6 * x * (xx - 3.0f * yy));
+    }
+  }
+
+  return result;
+}
 
 /**
  * Generates a vertex bounding a splat.
@@ -40,7 +125,7 @@ void main(in uint in_id : SV_VertexID,
           in uint in_view_id : SV_ViewID,
 #endif
           out half2 out_sig_div_sqrt_2 : DELTA_STD_DEVS,
-          out nointerpolation half4 out_color : COLOR,
+          out nointerpolation float4 out_color : COLOR,
           out half4 out_position : SV_Position) {
   // If using CPU sorting, indices are packed as (index, distance). No #if
   // needed if explicitly adding .x.
@@ -91,5 +176,27 @@ void main(in uint in_id : SV_VertexID,
   out_position =
       half4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
   out_sig_div_sqrt_2 = corners[in_id % 6];
-  out_color = half4(colors[splat_id]);
+
+  float4 base_color = colors[splat_id];
+
+  float3 world_camera_origin = DFHackToFloat(PrimaryView.WorldCameraOrigin);
+  float3 world_pos = float3(pos_world) + local_to_world[3].xyz;
+  float3 view_delta_world = world_pos - world_camera_origin;
+
+  // Imported SH coefficients stay in source basis. Convert view direction from
+  // UE local basis to source basis (x,y,z) = (Y,-Z,X).
+  float3x3 local_to_world_3x3 = (float3x3)local_to_world;
+  local_to_world_3x3[0] = normalize(local_to_world_3x3[0]);
+  local_to_world_3x3[1] = normalize(local_to_world_3x3[1]);
+  local_to_world_3x3[2] = normalize(local_to_world_3x3[2]);
+  float3x3 world_to_local_3x3 = transpose(local_to_world_3x3);
+  float3 view_dir_ue_local = mul(view_delta_world, world_to_local_3x3);
+  float3 view_dir_src = float3(
+    view_dir_ue_local.y,
+    -view_dir_ue_local.z,
+    view_dir_ue_local.x);
+  view_dir_src *= rsqrt(max(dot(view_dir_src, view_dir_src), 1e-8f));
+
+  base_color.rgb = max(base_color.rgb + eval_sh(splat_id, view_dir_src), 0.0f);
+  out_color = base_color;
 }

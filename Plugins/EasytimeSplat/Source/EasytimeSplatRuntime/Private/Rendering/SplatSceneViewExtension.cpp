@@ -110,8 +110,9 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 		}
 
 		FRDGPassRef ProjPass = ComputeTransforms(GraphBuilder, View, Proxy);
+		const bool bProxySortGPU = Proxy->IsSortingOnGPU();
 
-		if (bIsSortingOnGPU)
+		if (bProxySortGPU)
 		{
 			FRDGBufferDesc IndexDesc =
 				FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), NumSplats);
@@ -177,7 +178,8 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 			continue;
 		}
 
-		if (!bIsSortingOnGPU)
+		const bool bProxySortGPU = Proxy->IsSortingOnGPU();
+		if (!bProxySortGPU)
 		{
 			FCPUSortRenderProducerParameters* SetupParameters =
 				GraphBuilder
@@ -204,7 +206,7 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 			ERenderTargetLoadAction::ELoad,
 			FExclusiveDepthStencil::DepthWrite_StencilNop);
 
-		if (bIsSortingOnGPU)
+		if (bProxySortGPU)
 		{
 				FRenderSplatGPUSortDeps* PassParameters =
 					GraphBuilder.AllocParameters<FRenderSplatGPUSortDeps>();
@@ -282,7 +284,8 @@ void FSplatSceneViewExtension::PostRenderBasePassMobile_RenderThread(
 			RenderSplat,
 			TEXT("Splat: Render %s"),
 			Proxy->GetName());
-		if (bIsSortingOnGPU)
+		const bool bProxySortGPU = Proxy->IsSortingOnGPU();
+		if (bProxySortGPU)
 		{
 			FRenderSplatGPUSortDeps Parameters{};
 			Parameters.VS.Shared = Shared;

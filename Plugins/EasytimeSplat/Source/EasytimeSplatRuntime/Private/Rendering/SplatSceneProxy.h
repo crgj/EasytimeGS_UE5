@@ -179,6 +179,7 @@ public:
 	// 4DGS Bank Accessors
 	bool Is4D() const { return bIs4D; }
 	bool Uses4DInterpolation() const { return bIs4D && bUse4DInterpolation; }
+	bool IsSortingOnGPU() const { return bIsSortingOnGPU; }
 	FShaderResourceViewRHIRef GetXYZBankSRV() const;
 	FShaderResourceViewRHIRef GetRotBankSRV() const;
 	FShaderResourceViewRHIRef GetDCBankSRV() const;

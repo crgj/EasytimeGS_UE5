@@ -32,6 +32,13 @@ FSplatSceneProxy::FSplatSceneProxy(USplatComponent& Component)
 {
 	bIs4D = Cast<USplat4DAsset>(Asset) != nullptr;
 	bUse4DInterpolation = bIs4D;
+	// 4D splats update positions every frame. CPU sorting path currently sorts
+	// against static asset positions, which causes depth-order artifacts on
+	// animated frames. Force GPU sorting for 4D so sorting uses dynamic buffers.
+	if (bIs4D)
+	{
+		bIsSortingOnGPU = true;
+	}
 	SelectedSHDegree = FMath::Min<uint32>(Component.GetMaxSHDegree(), Asset ? Asset->GetAvailableSHDegree() : 0);
 	EASYTIME_LOGL(
 		"[SceneProxy Ctor] Name=%s Is4D=%d Use4DInterp=%d NumSplats=%u SortGPU=%d SHDegree=%u SHTriplets=%u",
