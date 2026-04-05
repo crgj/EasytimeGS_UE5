@@ -173,8 +173,33 @@ void FSplatSceneProxy::CreateRenderThreadResources(
 		DynamicPositions->InitRHI(RHICmdList);
 		DynamicCovariances.emplace(GetNumSplats(), PF_R32G32_UINT);
 		DynamicCovariances->InitRHI(RHICmdList);
-		DynamicColors.emplace(GetNumSplats(), PF_B8G8R8A8);
+		DynamicColors.emplace(GetNumSplats(), PF_FloatRGBA);
 		DynamicColors->InitRHI(RHICmdList);
+
+		int32 XYZStride = 1, RotStride = 1, DCStride = 1;
+		uint32 NumXYZBanks = 0, NumRotBanks = 0, NumDCBanks = 0;
+		Get4DMetadata(
+			XYZStride,
+			RotStride,
+			DCStride,
+			NumXYZBanks,
+			NumRotBanks,
+			NumDCBanks);
+		EASYTIME_LOGL(
+			"[SceneProxy 4D Resources] Name=%s xyzBanks=%u rotBanks=%u dcBanks=%u xyzStride=%d rotStride=%d dcStride=%d XYZ=%d ROT=%d DC=%d Life=%d Scale=%d AssetColor=%d",
+			*GetName(),
+			NumXYZBanks,
+			NumRotBanks,
+			NumDCBanks,
+			XYZStride,
+			RotStride,
+			DCStride,
+			GetXYZBankSRV().IsValid() ? 1 : 0,
+			GetRotBankSRV().IsValid() ? 1 : 0,
+			GetDCBankSRV().IsValid() ? 1 : 0,
+			GetLifetimeMuWSRV().IsValid() ? 1 : 0,
+			GetScalesSRV().IsValid() ? 1 : 0,
+			GetAssetColorsSRV().IsValid() ? 1 : 0);
 	}
 
 	check(GEngine);

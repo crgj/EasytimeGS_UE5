@@ -23,7 +23,7 @@ Buffer<uint2> indices;
 #endif
 Buffer<uint> positions;
 Buffer<half4> transforms;
-Buffer<half4> colors;
+Buffer<float4> colors;
 
 /**
  * Generates a vertex bounding a splat.
@@ -91,5 +91,5 @@ void main(in uint in_id : SV_VertexID,
   out_position =
       half4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
   out_sig_div_sqrt_2 = corners[in_id % 6];
-  out_color = colors[splat_id];
+  out_color = half4(colors[splat_id]);
 }

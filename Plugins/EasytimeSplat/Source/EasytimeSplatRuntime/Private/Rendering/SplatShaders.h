@@ -189,11 +189,11 @@ class FInterpolate4DCS final : public FGlobalShader
 	SHADER_PARAMETER_SRV(Buffer<float3>, dc_bank)
 	SHADER_PARAMETER_SRV(Buffer<float2>, lifetime_mu_w)
 	SHADER_PARAMETER_SRV(Buffer<float3>, scales)
-	SHADER_PARAMETER_SRV(Buffer<uint>, base_colors)
+	SHADER_PARAMETER_SRV(Buffer<float4>, base_colors)
 
 	SHADER_PARAMETER_UAV(RWBuffer<uint>, out_positions)
 	SHADER_PARAMETER_UAV(RWBuffer<uint2>, out_covariances)
-	SHADER_PARAMETER_UAV(RWBuffer<uint>, out_colors)
+	SHADER_PARAMETER_UAV(RWBuffer<float4>, out_colors)
 	END_SHADER_PARAMETER_STRUCT()
 
 public:

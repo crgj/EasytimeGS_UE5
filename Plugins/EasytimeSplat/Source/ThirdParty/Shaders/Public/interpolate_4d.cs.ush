@@ -7,7 +7,7 @@ Buffer<float4> rot_bank;
 Buffer<float3> dc_bank;
 Buffer<float2> lifetime_mu_w;
 Buffer<float3> scales;
-Buffer<uint> base_colors;
+Buffer<float4> base_colors;
 
 float current_frame;
 uint num_xyz_banks;
@@ -22,12 +22,17 @@ float3 pos_min_cm;
 
 RWBuffer<uint> out_positions;
 RWBuffer<uint2> out_covariances;
-RWBuffer<uint> out_colors;
+RWBuffer<float4> out_colors;
 
 // Simple packing for UNorm
 uint to_unorm(float f, uint bits) {
     uint max_val = (1u << bits) - 1u;
     return uint(saturate(f) * float(max_val) + 0.5f);
+}
+
+float3 dc_to_linear_rgb(float3 dc) {
+    float3 color_srgb = 0.5f + 0.2820948f * dc;
+    return saturate(pow(max(color_srgb, 0.0f), 2.2f));
 }
 
 // Float to custom 5e5/5e6 format (simplified for GPU)
@@ -153,26 +158,27 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     
     out_covariances[i] = uint2( (yy << 22) | (yz << 11) | zz, (xx << 22) | (xy << 11) | xz ); // High/Low 32 bit split
     
-    // 4. Interpolate Color (DC)
-    uint k_dc = uint(current_frame) / max(1u, dc_stride);
-    float alpha_dc = frac(current_frame / float(max(1u, dc_stride)));
-    uint k_dc_0 = 0;
-    uint k_dc_1 = 0;
-    if (num_dc_banks > 1u) {
-        k_dc_0 = min(k_dc, num_dc_banks - 2u);
-        k_dc_1 = k_dc_0 + 1u;
+    // 4. Color and opacity
+    float4 base_color = saturate(base_colors[i]);
+    float3 rgb = base_color.rgb;
+    if (num_dc_banks > 0u)
+    {
+        uint k_dc = uint(current_frame) / max(1u, dc_stride);
+        float alpha_dc = frac(current_frame / float(max(1u, dc_stride)));
+        uint k_dc_0 = 0;
+        uint k_dc_1 = 0;
+        if (num_dc_banks > 1u)
+        {
+            k_dc_0 = min(k_dc, num_dc_banks - 2u);
+            k_dc_1 = k_dc_0 + 1u;
+        }
+
+        float3 dc0 = dc_bank[i * num_dc_banks + k_dc_0];
+        float3 dc1 = dc_bank[i * num_dc_banks + k_dc_1];
+        float3 dc_interp = lerp(dc0, dc1, alpha_dc);
+        rgb = dc_to_linear_rgb(dc_interp);
     }
-    float3 c0 = dc_bank[i * num_dc_banks + k_dc_0];
-    float3 c1 = dc_bank[i * num_dc_banks + k_dc_1];
-    float3 c_interp = lerp(c0, c1, alpha_dc);
-    
-    // Convert SH DC to RGB (approx: 0.28209 * SH)
-    float3 rgb = max(0, c_interp * 0.28209479177387814f + 0.5f);
-    uint packed_base_color = base_colors[i];
-    float base_alpha = float((packed_base_color >> 24) & 0xFFu) / 255.0f;
-    uint r8 = to_unorm(rgb.r, 8);
-    uint g8 = to_unorm(rgb.g, 8);
-    uint b8 = to_unorm(rgb.b, 8);
-    uint a8 = to_unorm(base_alpha * opacity_multiplier, 8);
-    out_colors[i] = (a8 << 24) | (b8 << 16) | (g8 << 8) | r8;
+
+    float base_alpha = base_color.a;
+    out_colors[i] = float4(rgb, base_alpha * opacity_multiplier);
 }

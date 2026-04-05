@@ -265,6 +265,52 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		}
 	}
 
+	if (PLYMetadata.num_splats > 0)
+	{
+		const FColor& ImportedColor0 = Colors[0];
+		float RawOpacity0 = 0.0f;
+		if (PLYMetadata.properties.contains(Property::Opacity))
+		{
+			const uint8* BasePtr0 = reinterpret_cast<const uint8*>(Parser.buffer.data());
+			const uint8* OpacityPtr0 = BasePtr0 + Parser.layout.at(Property::Opacity).offset;
+			RawOpacity0 = *(float*)OpacityPtr0;
+		}
+		if (PLYMetadata.num_dc_banks > 0)
+		{
+			const FVector3f& DC0 = DCBankData[0];
+			EASYTIME_LOGL(
+				"[4D Import DC0] Raw=(%.6f, %.6f, %.6f) OpacityRaw=%.6f -> Color=(%d,%d,%d,%d)",
+				DC0.X,
+				DC0.Y,
+				DC0.Z,
+				RawOpacity0,
+				(int32)ImportedColor0.R,
+				(int32)ImportedColor0.G,
+				(int32)ImportedColor0.B,
+				(int32)ImportedColor0.A);
+
+			if (PLYMetadata.num_dc_banks > 1)
+			{
+				const FVector3f& DC1 = DCBankData[1];
+				EASYTIME_LOGL(
+					"[4D Import DC1] Raw=(%.6f, %.6f, %.6f)",
+					DC1.X,
+					DC1.Y,
+					DC1.Z);
+			}
+		}
+		else
+		{
+			EASYTIME_LOGL(
+				"[4D Import DC] No dc_bank found. OpacityRaw=%.6f BaseColor0=(%d,%d,%d,%d)",
+				RawOpacity0,
+				(int32)ImportedColor0.R,
+				(int32)ImportedColor0.G,
+				(int32)ImportedColor0.B,
+				(int32)ImportedColor0.A);
+		}
+	}
+
 	for (FQuat4f& Q : Rotations)
 	{
 		Q = SafeNormalizedQuat(Q);
