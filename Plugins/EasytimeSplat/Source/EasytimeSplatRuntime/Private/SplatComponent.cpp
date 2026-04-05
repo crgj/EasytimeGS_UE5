@@ -4,6 +4,7 @@
 
 #include "SplatComponent.h"
 
+#include "Logging.h"
 #include "Misc/AssertionMacros.h"
 #include "Rendering/SplatSceneProxy.h"
 
@@ -17,7 +18,18 @@ using Easytime::Splat::FSplatSceneProxy;
 FPrimitiveSceneProxy* USplatComponent::CreateSceneProxy()
 {
 	// Note: Unreal expects a new here, and will handle deletion itself.
-	return Asset ? new FSplatSceneProxy{*this} : nullptr;
+	if (!Asset)
+	{
+		EASYTIME_LOGW("[CreateSceneProxy] %s has no Asset", *GetNameSafe(this));
+		return nullptr;
+	}
+
+	EASYTIME_LOGL(
+		"[CreateSceneProxy] Component=%s Asset=%s Class=%s",
+		*GetNameSafe(this),
+		*GetNameSafe(Asset),
+		*GetNameSafe(Asset->GetClass()));
+	return new FSplatSceneProxy{*this};
 }
 
 UBodySetup* USplatComponent::GetBodySetup()
@@ -72,11 +84,27 @@ USplatComponent::CalcBounds(const FTransform& LocalToWorld) const
 		BodySetup->AggGeom.CalcBoxSphereBounds(NewBounds, LocalToWorld);
 		return NewBounds;
 	}
-	else
+
+	if (Asset)
 	{
-		return FBoxSphereBounds(
-			LocalToWorld.GetLocation(), FVector::ZeroVector, 0.f);
+		TConstArrayView<FVector3f> Positions = Asset->GetPositions();
+		if (Positions.Num() > 0)
+		{
+			FBox LocalBox(EForceInit::ForceInit);
+			for (const FVector3f& Position : Positions)
+			{
+				LocalBox += FVector(Position);
+			}
+
+			if (LocalBox.IsValid)
+			{
+				return FBoxSphereBounds(LocalBox).TransformBy(LocalToWorld);
+			}
+		}
 	}
+
+	return FBoxSphereBounds(
+		LocalToWorld.GetLocation(), FVector::ZeroVector, 0.f);
 }
 
 

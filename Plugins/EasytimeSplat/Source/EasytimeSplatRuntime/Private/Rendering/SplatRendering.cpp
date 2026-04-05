@@ -99,10 +99,7 @@ FRDGPassRef CalculateDistances(
 FRDGPassRef Interpolate4D(
 	FRDGBuilder& GraphBuilder,
 	FSplatSceneProxy* Proxy,
-	float CurrentFrame,
-	FRDGBufferRef OutPositions,
-	FRDGBufferRef OutCovariances,
-	FRDGBufferRef OutColors)
+	float CurrentFrame)
 {
 	check(Proxy);
 
@@ -127,6 +124,7 @@ FRDGPassRef Interpolate4D(
 	Params->dc_bank = Proxy->GetDCBankSRV();
 	Params->lifetime_mu_w = Proxy->GetLifetimeMuWSRV();
 	Params->scales = Proxy->GetScalesSRV();
+	Params->base_colors = Proxy->GetAssetColorsSRV();
 
 	int32 XYZStride, RotStride, DCStride;
 	uint32 NumXYZBanks, NumRotBanks, NumDCBanks;
@@ -140,10 +138,9 @@ FRDGPassRef Interpolate4D(
 	Params->num_rot_banks = NumRotBanks;
 	Params->num_dc_banks = NumDCBanks;
 
-	Params->out_positions = GraphBuilder.CreateUAV(OutPositions, PF_R32_UINT);
-	Params->out_covariances =
-		GraphBuilder.CreateUAV(OutCovariances, PF_R32G32_UINT);
-	Params->out_colors = GraphBuilder.CreateUAV(OutColors, PF_B8G8R8A8);
+	Params->out_positions = Proxy->GetDynamicPositionsUAV();
+	Params->out_covariances = Proxy->GetDynamicCovariancesUAV();
+	Params->out_colors = Proxy->GetDynamicColorsUAV();
 
 	return FComputeShaderUtils::AddPass(
 		GraphBuilder,
@@ -284,65 +281,6 @@ void RenderSplatCPUSort(
 	RHICmdList.DrawPrimitive(0, 2 * NumSplats, 1);
 }
 
-void RenderSplatCPUSortRDG(
-	FRHICommandList& RHICmdList,
-	FRenderSplatCPURDGParams* SplatParameters,
-	uint32 NumSplats,
-	const FSceneView& View)
-{
-	check(SplatParameters);
-
-	const FGlobalShaderMap* GlobalShaderMap =
-		GetGlobalShaderMap(GMaxRHIFeatureLevel);
-	TShaderRef<Shaders::FRenderSplatVS<Shaders::ESortingDevice::CPU, true>>
-		VertexShader = GlobalShaderMap->GetShader<
-			Shaders::FRenderSplatVS<Shaders::ESortingDevice::CPU, true>>();
-	TShaderRef<Shaders::FRenderSplatPS> PixelShader =
-		GlobalShaderMap->GetShader<Shaders::FRenderSplatPS>();
-
-	check(View.bIsViewInfo);
-	const FIntRect ViewRect = static_cast<const FViewInfo&>(View).ViewRect;
-	RHICmdList.SetViewport(
-		float(ViewRect.Min.X),
-		float(ViewRect.Min.Y),
-		0.f,
-		float(ViewRect.Max.X),
-		float(ViewRect.Max.Y),
-		1.f);
-
-	FGraphicsPipelineStateInitializer GraphicsPSOInit;
-	GraphicsPSOInit.PrimitiveType = PT_TriangleList;
-	GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI =
-		PipelineStateCache::GetOrCreateVertexDeclaration({});
-	GraphicsPSOInit.BoundShaderState.VertexShaderRHI =
-		VertexShader.GetVertexShader();
-	GraphicsPSOInit.BoundShaderState.PixelShaderRHI =
-		PixelShader.GetPixelShader();
-	GraphicsPSOInit.DepthStencilState =
-		TStaticDepthStencilState<false>::GetRHI();
-	GraphicsPSOInit.RasterizerState = TStaticRasterizerState<>::GetRHI();
-	GraphicsPSOInit.BlendState = TStaticBlendState<
-		CW_RGBA,
-		BO_Add,
-		BF_SourceAlpha,
-		BF_InverseSourceAlpha>::GetRHI();
-	RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
-
-	SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-	SetShaderParameters(
-		RHICmdList,
-		VertexShader,
-		VertexShader.GetVertexShader(),
-		SplatParameters->VS);
-	SetShaderParameters(
-		RHICmdList,
-		PixelShader,
-		PixelShader.GetPixelShader(),
-		SplatParameters->PS);
-
-	RHICmdList.DrawPrimitive(0, 2 * NumSplats, 1);
-}
-
 void RenderSplatGPUSort(
 	FRHICommandList& RHICmdList,
 	FRenderSplatGPUSortDeps* SplatParameters,
@@ -356,65 +294,6 @@ void RenderSplatGPUSort(
 	TShaderRef<Shaders::FRenderSplatVS<Shaders::ESortingDevice::GPU>>
 		VertexShader = GlobalShaderMap->GetShader<
 			Shaders::FRenderSplatVS<Shaders::ESortingDevice::GPU>>();
-	TShaderRef<Shaders::FRenderSplatPS> PixelShader =
-		GlobalShaderMap->GetShader<Shaders::FRenderSplatPS>();
-
-	check(View.bIsViewInfo);
-	const FIntRect ViewRect = static_cast<const FViewInfo&>(View).ViewRect;
-	RHICmdList.SetViewport(
-		float(ViewRect.Min.X),
-		float(ViewRect.Min.Y),
-		0.f,
-		float(ViewRect.Max.X),
-		float(ViewRect.Max.Y),
-		1.f);
-
-	FGraphicsPipelineStateInitializer GraphicsPSOInit;
-	GraphicsPSOInit.PrimitiveType = PT_TriangleList;
-	GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI =
-		PipelineStateCache::GetOrCreateVertexDeclaration({});
-	GraphicsPSOInit.BoundShaderState.VertexShaderRHI =
-		VertexShader.GetVertexShader();
-	GraphicsPSOInit.BoundShaderState.PixelShaderRHI =
-		PixelShader.GetPixelShader();
-	GraphicsPSOInit.DepthStencilState =
-		TStaticDepthStencilState<false>::GetRHI();
-	GraphicsPSOInit.RasterizerState = TStaticRasterizerState<>::GetRHI();
-	GraphicsPSOInit.BlendState = TStaticBlendState<
-		CW_RGBA,
-		BO_Add,
-		BF_SourceAlpha,
-		BF_InverseSourceAlpha>::GetRHI();
-	RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
-
-	SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-	SetShaderParameters(
-		RHICmdList,
-		VertexShader,
-		VertexShader.GetVertexShader(),
-		SplatParameters->VS);
-	SetShaderParameters(
-		RHICmdList,
-		PixelShader,
-		PixelShader.GetPixelShader(),
-		SplatParameters->PS);
-
-	RHICmdList.DrawPrimitive(0, 2 * NumSplats, 1);
-}
-
-void RenderSplatGPUSortRDG(
-	FRHICommandList& RHICmdList,
-	FRenderSplatGPURDGParams* SplatParameters,
-	uint32 NumSplats,
-	const FSceneView& View)
-{
-	check(SplatParameters);
-
-	const FGlobalShaderMap* GlobalShaderMap =
-		GetGlobalShaderMap(GMaxRHIFeatureLevel);
-	TShaderRef<Shaders::FRenderSplatVS<Shaders::ESortingDevice::GPU, true>>
-		VertexShader = GlobalShaderMap->GetShader<
-			Shaders::FRenderSplatVS<Shaders::ESortingDevice::GPU, true>>();
 	TShaderRef<Shaders::FRenderSplatPS> PixelShader =
 		GlobalShaderMap->GetShader<Shaders::FRenderSplatPS>();
 

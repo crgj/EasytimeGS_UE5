@@ -14,32 +14,13 @@
 namespace Easytime::Splat
 {
 
-// Workaround for macro-template comma issues
-using FRenderSplatVS_CPURDG = Shaders::FRenderSplatVS<Shaders::ESortingDevice::CPU, true>;
-using FRenderSplatVS_GPURDG = Shaders::FRenderSplatVS<Shaders::ESortingDevice::GPU, true>;
-
-BEGIN_SHADER_PARAMETER_STRUCT(FRenderSplatCPURDGParams, )
-	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint2>, Indices) // (Index, Distance)
-	SHADER_PARAMETER_STRUCT_INCLUDE(FRenderSplatVS_CPURDG::FParameters, VS)
-	SHADER_PARAMETER_STRUCT_INCLUDE(Shaders::FRenderSplatPS::FParameters, PS)
-END_SHADER_PARAMETER_STRUCT()
-
-BEGIN_SHADER_PARAMETER_STRUCT(FRenderSplatGPURDGParams, )
-	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, Indices)
-	SHADER_PARAMETER_STRUCT_INCLUDE(FRenderSplatVS_GPURDG::FParameters, VS)
-	SHADER_PARAMETER_STRUCT_INCLUDE(Shaders::FRenderSplatPS::FParameters, PS)
-END_SHADER_PARAMETER_STRUCT()
-
 /**
  * Adds 4D interpolation pass.
  */
 FRDGPassRef Interpolate4D(
 	FRDGBuilder& GraphBuilder,
 	FSplatSceneProxy* Proxy,
-	float CurrentFrame,
-	FRDGBufferRef OutPositions,
-	FRDGBufferRef OutCovariances,
-	FRDGBufferRef OutColors);
+	float CurrentFrame);
 
 /**
  * Adds distance calculation compute shader pass.
@@ -91,12 +72,6 @@ void RenderSplatCPUSort(
 	uint32 NumSplats,
 	const FSceneView& View);
 
-void RenderSplatCPUSortRDG(
-	FRHICommandList& RHICmdList,
-	FRenderSplatCPURDGParams* SplatParameters,
-	uint32 NumSplats,
-	const FSceneView& View);
-
 /**
  * Draws a splat, sorted by GPU.
  *
@@ -108,12 +83,6 @@ void RenderSplatCPUSortRDG(
 void RenderSplatGPUSort(
 	FRHICommandList& RHICmdList,
 	FRenderSplatGPUSortDeps* SplatParameters,
-	uint32 NumSplats,
-	const FSceneView& View);
-
-void RenderSplatGPUSortRDG(
-	FRHICommandList& RHICmdList,
-	FRenderSplatGPURDGParams* SplatParameters,
 	uint32 NumSplats,
 	const FSceneView& View);
 

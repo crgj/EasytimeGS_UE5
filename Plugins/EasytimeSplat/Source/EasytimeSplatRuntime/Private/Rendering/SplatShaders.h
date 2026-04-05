@@ -32,10 +32,6 @@ SHADER_PARAMETER_SRV(Buffer<uint>, positions)
 END_SHADER_PARAMETER_STRUCT()
 
 // WDD-20260405 00:44 RDG版只保留SRV不重复标量，避免packoffset重定义
-BEGIN_SHADER_PARAMETER_STRUCT(FPackedPositionRDGParameters, )
-SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, positionsRDG)
-END_SHADER_PARAMETER_STRUCT()
-
 /**
  * Calculates distances to each splat, for GPU sorting.
  */
@@ -120,16 +116,10 @@ SHADER_PARAMETER_SRV(Buffer<float4>, colors)
 END_SHADER_PARAMETER_STRUCT()
 
 // WDD-2026-04-05 01:00 用rdg_前缀避免与FPackedPositionParameters同名字段的运行时绑定冲突
-BEGIN_SHADER_PARAMETER_STRUCT(FRenderSplatRDGSharedParameters, )
-SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, rdg_positions)
-SHADER_PARAMETER_SRV(Buffer<float4>, rdg_transforms)
-SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, rdg_colors)
-END_SHADER_PARAMETER_STRUCT()
-
 /**
  * Per splat, creates a containing triangle.
  */
-template <ESortingDevice Device, bool bUseRDG = false>
+template <ESortingDevice Device>
 class FRenderSplatVS final : public FGlobalShader
 {
 	DECLARE_GLOBAL_SHADER(FRenderSplatVS);
@@ -144,8 +134,6 @@ class FRenderSplatVS final : public FGlobalShader
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 	SHADER_PARAMETER_STRUCT_INCLUDE(FRenderSplatSharedParameters, Shared)
-	SHADER_PARAMETER_STRUCT_INCLUDE(FRenderSplatRDGSharedParameters, SharedRDG)
-	SHADER_PARAMETER(uint32, bIsUsingRDG)
 	SHADER_PARAMETER_SRV(Buffer<T>, Indices)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -159,10 +147,6 @@ public:
 			FGlobalShader::ModifyCompilationEnvironment(
 				Parameters, OutEnvironment);
 			OutEnvironment.SetDefine(TEXT("GPU_SORT"), 1);
-		}
-		if constexpr (bUseRDG)
-		{
-			OutEnvironment.SetDefine(TEXT("USE_RDG_BUFFERS"), 1);
 		}
 	}
 };
@@ -205,10 +189,11 @@ class FInterpolate4DCS final : public FGlobalShader
 	SHADER_PARAMETER_SRV(Buffer<float3>, dc_bank)
 	SHADER_PARAMETER_SRV(Buffer<float2>, lifetime_mu_w)
 	SHADER_PARAMETER_SRV(Buffer<float3>, scales)
+	SHADER_PARAMETER_SRV(Buffer<uint>, base_colors)
 
-	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, out_positions)
-	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, out_covariances)
-	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, out_colors)
+	SHADER_PARAMETER_UAV(RWBuffer<uint>, out_positions)
+	SHADER_PARAMETER_UAV(RWBuffer<uint2>, out_covariances)
+	SHADER_PARAMETER_UAV(RWBuffer<uint>, out_colors)
 	END_SHADER_PARAMETER_STRUCT()
 
 public:

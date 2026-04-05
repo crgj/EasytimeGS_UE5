@@ -143,6 +143,18 @@ public:
 	 * @param PositionsMeters - An array of positions, one per splat, in meters.
 	 */
 	void SetPositionsMeters(TArray<FVector3f>&& PositionsMeters);
+
+	/**
+	 * Populates this asset with the given positions, while forcing the packed
+	 * quantization range to match a wider motion envelope.
+	 *
+	 * @param PosMinMeters - Minimum position over all frames, in meters.
+	 * @param PosMaxMeters - Maximum position over all frames, in meters.
+	 */
+	void SetPositionsMeters(
+		TArray<FVector3f>&& PositionsMeters,
+		const FVector3f& PosMinMeters,
+		const FVector3f& PosMaxMeters);
 #endif
 
 private:
@@ -157,7 +169,10 @@ private:
 	 *
 	 * @param PositionsMeters - An array of positions, one per splat, in meters.
 	 */
-	void SetPositionsMetersInternal(const TArray<FVector3f>& PositionsMeters);
+	void SetPositionsMetersInternal(
+		const TArray<FVector3f>& PositionsMeters,
+		const FVector3f* OverrideMinMeters = nullptr,
+		const FVector3f* OverrideMaxMeters = nullptr);
 
 	uint32 NumSplats = 0;
 

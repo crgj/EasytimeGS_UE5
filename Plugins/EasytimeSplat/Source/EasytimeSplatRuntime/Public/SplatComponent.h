@@ -50,6 +50,26 @@ public:
 	 */
 	TObjectPtr<USplatAsset> GetAsset() const { return Asset; }
 
+	/**
+	 * Sets the asset and refreshes render/collision state.
+	 */
+	void SetAsset(TObjectPtr<USplatAsset> InAsset)
+	{
+		if (Asset == InAsset)
+		{
+			return;
+		}
+
+		Asset = InAsset;
+		BodySetup = nullptr;
+		if (Asset)
+		{
+			GetBodySetup();
+		}
+		UpdateBounds();
+		MarkRenderStateDirty();
+	}
+
 private:
 	UPROPERTY(Category = Splat, EditAnywhere)
 	TObjectPtr<USplatAsset> Asset;

@@ -27,6 +27,6 @@ void UActorFactorySplat::PostSpawnActor(UObject* Asset, AActor* NewActor)
 {
 	ASplatActor* SplatActor = CastChecked<ASplatActor>(NewActor);
 	check(SplatActor->SplatComponent);
-	SplatActor->SplatComponent->Asset = CastChecked<USplatAsset>(Asset);
+	SplatActor->SplatComponent->SetAsset(CastChecked<USplatAsset>(Asset));
 }
 

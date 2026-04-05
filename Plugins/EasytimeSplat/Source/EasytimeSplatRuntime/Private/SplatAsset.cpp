@@ -123,10 +123,22 @@ void USplatAsset::SetPositionsMeters(TArray<FVector3f>&& PositionsMeters)
 
 	SetPositionsMetersInternal(PositionsFullPrecision);
 }
+
+void USplatAsset::SetPositionsMeters(
+	TArray<FVector3f>&& PositionsMeters,
+	const FVector3f& PosMinMeters,
+	const FVector3f& PosMaxMeters)
+{
+	PositionsFullPrecision = std::move(PositionsMeters);
+	SetPositionsMetersInternal(
+		PositionsFullPrecision, &PosMinMeters, &PosMaxMeters);
+}
 #endif
 
 void USplatAsset::SetPositionsMetersInternal(
-	const TArray<FVector3f>& PositionsMeters)
+	const TArray<FVector3f>& PositionsMeters,
+	const FVector3f* OverrideMinMeters,
+	const FVector3f* OverrideMaxMeters)
 {
 	check(PositionsMeters.Num() == NumSplats);
 
@@ -142,6 +154,11 @@ void USplatAsset::SetPositionsMetersInternal(
 	{
 		PosMaxM = PosMaxM.ComponentMax(PosM);
 		PosMinM = PosMinM.ComponentMin(PosM);
+	}
+	if (OverrideMinMeters && OverrideMaxMeters)
+	{
+		PosMinM = *OverrideMinMeters;
+		PosMaxM = *OverrideMaxMeters;
 	}
 	check(PosMaxM.GetMin() > std::numeric_limits<float>::lowest());
 	check(PosMinM.GetMax() < std::numeric_limits<float>::max());

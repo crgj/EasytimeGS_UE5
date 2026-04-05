@@ -143,15 +143,51 @@ export class PLY4Loader {
             currentOffset += p.size;
         });
 
-        const getFloat = (name: string, rowBase: number) => {
-            if (propOffsets[name] === undefined) return 0;
-            const offset = rowBase + propOffsets[name];
-            if (offset + 4 > buffer.byteLength) {
-                // console.warn(`[PLY4] OOB Read for ${name} at ${offset}`);
-                return 0;
+        const propByName: Record<string, { name: string, type: string, size: number, typeCode: string }> = {};
+        propertyTypes.forEach((p) => {
+            propByName[p.name] = p;
+        });
+
+        const readNumericByType = (offset: number, typeCode: string): number => {
+            switch (typeCode) {
+                case 'char':
+                case 'int8':
+                    return view.getInt8(offset);
+                case 'uchar':
+                case 'uint8':
+                    return view.getUint8(offset);
+                case 'short':
+                case 'int16':
+                    return view.getInt16(offset, isLittleEndian);
+                case 'ushort':
+                case 'uint16':
+                    return view.getUint16(offset, isLittleEndian);
+                case 'int':
+                case 'int32':
+                    return view.getInt32(offset, isLittleEndian);
+                case 'uint':
+                case 'uint32':
+                    return view.getUint32(offset, isLittleEndian);
+                case 'double':
+                case 'float64':
+                    return view.getFloat64(offset, isLittleEndian);
+                case 'float':
+                case 'float32':
+                default:
+                    return view.getFloat32(offset, isLittleEndian);
             }
-            // Assume float32 for now
-            return view.getFloat32(offset, isLittleEndian);
+        };
+
+        const getFloat = (name: string, rowBase: number) => {
+            const prop = propByName[name];
+            const propOffset = propOffsets[name];
+            if (!prop || propOffset === undefined) return 0;
+
+            const offset = rowBase + propOffset;
+            if (offset + prop.size > buffer.byteLength) return 0;
+
+            const v = readNumericByType(offset, prop.typeCode);
+            return Number.isFinite(v) ? v : 0;
         };
 
         // Cache property names for fast iteration
@@ -174,6 +210,11 @@ export class PLY4Loader {
             data.x[i] = getFloat('x', rowBase);
             data.y[i] = getFloat('y', rowBase);
             data.z[i] = getFloat('z', rowBase);
+
+            if ((i < 3) && (!Number.isFinite(data.x[i]) || !Number.isFinite(data.y[i]) || !Number.isFinite(data.z[i]) ||
+                Math.abs(data.x[i]) > 1e8 || Math.abs(data.y[i]) > 1e8 || Math.abs(data.z[i]) > 1e8)) {
+                console.warn(`[PLY4] Suspicious position at vertex ${i}: (${data.x[i]}, ${data.y[i]}, ${data.z[i]})`);
+            }
 
             // Opacity: PLY is Logit. Convert to Linear.
             const opacLogit = getFloat('opacity', rowBase);

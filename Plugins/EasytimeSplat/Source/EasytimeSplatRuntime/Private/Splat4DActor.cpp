@@ -19,7 +19,22 @@ void ASplat4DActor::Tick(float DeltaTime)
 	if (Splat4DComponent)
 	{
 		Splat4DComponent->CurrentFrame = CurrentFrame;
+		Splat4DComponent->ApplyCurrentFrame();
 	}
 }
+
+#if WITH_EDITOR
+void ASplat4DActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	if (Splat4DComponent)
+	{
+		Splat4DComponent->CurrentFrame = CurrentFrame;
+		Splat4DComponent->ApplyCurrentFrame();
+		Splat4DComponent->MarkRenderStateDirty();
+	}
+}
+#endif
 
 

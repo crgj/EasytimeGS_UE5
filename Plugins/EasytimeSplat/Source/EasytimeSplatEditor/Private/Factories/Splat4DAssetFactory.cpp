@@ -20,6 +20,20 @@ using Easytime::Splat::MetersToCentimeters;
 
 namespace
 {
+FQuat4f SafeNormalizedQuat(const FQuat4f& InQuat)
+{
+	const FVector4f V(InQuat.X, InQuat.Y, InQuat.Z, InQuat.W);
+	if (!V.ContainsNaN() && FMath::IsFinite(V.X) && FMath::IsFinite(V.Y) && FMath::IsFinite(V.Z) && FMath::IsFinite(V.W))
+	{
+		const float Sq = InQuat.SizeSquared();
+		if (Sq > KINDA_SMALL_NUMBER)
+		{
+			return InQuat.GetNormalized();
+		}
+	}
+	return FQuat4f::Identity;
+}
+
 void MaybeAddIndex4D(TMap<uint32, uint32>& IndexMap, uint32 Index)
 {
 	if (!IndexMap.Contains(Index))
@@ -119,6 +133,16 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		EASYTIME_LOGE("Invalid .ply4 metadata (total_frames <= 0) for %s.", *InName.ToString());
 		return nullptr;
 	}
+	EASYTIME_LOGL(
+		"[4D Import] splats=%d frames=%d xyzBanks=%d rotBanks=%d dcBanks=%d xyzStride=%d rotStride=%d dcStride=%d",
+		(int32)PLYMetadata.num_splats,
+		PLYMetadata.total_frames,
+		PLYMetadata.num_xyz_banks,
+		PLYMetadata.num_rot_banks,
+		PLYMetadata.num_dc_banks,
+		PLYMetadata.xyz_stride,
+		PLYMetadata.rot_stride,
+		PLYMetadata.dc_stride);
 
 	TArray<FVector3f> Positions;
 	Positions.SetNumUninitialized(PLYMetadata.num_splats);
@@ -129,13 +153,17 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	TArray<FColor> Colors;
 	Colors.SetNumUninitialized(PLYMetadata.num_splats);
 
+	// Base-frame import for UE runtime path uses the same coordinate conversion
+	// as 3DGS import.
 	ParseSplatFn ParseSplat =
 		[P = std::span<FVector3f>(&Positions[0], Positions.Num()),
 	     R = std::span<FQuat4f>(&Rotations[0], Rotations.Num()),
 	     S = std::span<FVector3f>(&Scales[0], Scales.Num()),
 	     C = std::span<FColor>(&Colors[0], Colors.Num())](
 			uint32_t Index, GetPropertyFn Get)
-	{ ply::convert_splat<FVector3f, FQuat4f, FColor>(Index, Get, P, R, S, C); };
+	{
+		ply::convert_splat(Index, Get, P, R, S, C);
+	};
 
 	if (!Parser.parse_data(ParseSplat))
 	{
@@ -143,7 +171,7 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		return nullptr;
 	}
 
-	USplat4DAsset* ResultAsset = NewObject<USplat4DAsset>(InParent, InName, Flags);
+		USplat4DAsset* ResultAsset = NewObject<USplat4DAsset>(InParent, InName, Flags);
 	ResultAsset->SetNumSplats(PLYMetadata.num_splats);
 	ResultAsset->TotalFrames = PLYMetadata.total_frames;
 	ResultAsset->XYZStride = PLYMetadata.xyz_stride;
@@ -159,10 +187,12 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	RotBankData.SetNumUninitialized(PLYMetadata.num_splats * PLYMetadata.num_rot_banks);
 	TArray<FVector3f> DCBankData;
 	DCBankData.SetNumUninitialized(PLYMetadata.num_splats * PLYMetadata.num_dc_banks);
-	TArray<FVector2f> LifetimeData;
-	LifetimeData.SetNumUninitialized(PLYMetadata.num_splats);
+		TArray<FVector2f> LifetimeData;
+		LifetimeData.Init(FVector2f(0.0f, 1.0f), PLYMetadata.num_splats);
 
-	const uint8* SplatPtr = BufferView.data();
+	// Offsets in Parser.layout / xyz_banks / rot_banks / dc_banks are relative to
+	// the binary body (after end_header), not the file start.
+	const uint8* SplatPtr = reinterpret_cast<const uint8*>(Parser.buffer.data());
 	for (uint32_t i = 0; i < PLYMetadata.num_splats; ++i)
 	{
 		for (int32 b = 0; b < PLYMetadata.num_xyz_banks; ++b)
@@ -202,6 +232,82 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		SplatPtr += Parser.splat_size;
 	}
 
+	// Prefer bank frame 0 as authoritative static frame for 4D assets.
+	// This guarantees USplatAsset base buffers are initialized even when
+	// rot_0..3 are absent in .ply4.
+	if (PLYMetadata.num_xyz_banks > 0)
+	{
+		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
+		{
+			const FVector3f& Src = XYZBankData[i * PLYMetadata.num_xyz_banks];
+			Positions[i] = FVector3f(Src.Z, Src.X, -Src.Y);
+		}
+	}
+	if (PLYMetadata.num_rot_banks > 0)
+	{
+		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
+		{
+			const FQuat4f Src = SafeNormalizedQuat(RotBankData[i * PLYMetadata.num_rot_banks]);
+			Rotations[i] = SafeNormalizedQuat(FQuat4f(-Src.Z, -Src.X, Src.Y, Src.W));
+		}
+	}
+	if (PLYMetadata.num_dc_banks > 0)
+	{
+		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
+		{
+			const FVector3f& DC0 = DCBankData[i * PLYMetadata.num_dc_banks];
+			const uint8 BaseAlpha = Colors[i].A;
+			Colors[i] = FColor(
+				to_color_linear(DC0.X),
+				to_color_linear(DC0.Y),
+				to_color_linear(DC0.Z),
+				BaseAlpha);
+		}
+	}
+
+	for (FQuat4f& Q : Rotations)
+	{
+		Q = SafeNormalizedQuat(Q);
+	}
+
+	if (Positions.Num() > 0 && Rotations.Num() > 0 && Colors.Num() > 0)
+	{
+		const FVector3f& P0 = Positions[0];
+		const FQuat4f& Q0 = Rotations[0];
+		const FColor& C0 = Colors[0];
+		EASYTIME_LOGL(
+			"[4D Import Base0] P=(%.3f,%.3f,%.3f) Q=(%.3f,%.3f,%.3f,%.3f) C=(%d,%d,%d,%d)",
+			P0.X,
+			P0.Y,
+			P0.Z,
+			Q0.X,
+			Q0.Y,
+			Q0.Z,
+			Q0.W,
+			(int32)C0.R,
+			(int32)C0.G,
+			(int32)C0.B,
+			(int32)C0.A);
+	}
+
+	FVector3f QuantMin = Positions.Num() > 0
+		? Positions[0]
+		: FVector3f::ZeroVector;
+	FVector3f QuantMax = QuantMin;
+	if (PLYMetadata.num_xyz_banks > 0)
+	{
+		for (uint32 i = 0; i < PLYMetadata.num_splats; ++i)
+		{
+			for (int32 b = 0; b < PLYMetadata.num_xyz_banks; ++b)
+			{
+				const FVector3f& Src = XYZBankData[i * PLYMetadata.num_xyz_banks + b];
+				const FVector3f Converted(Src.Z, Src.X, -Src.Y);
+				QuantMin = QuantMin.ComponentMin(Converted);
+				QuantMax = QuantMax.ComponentMax(Converted);
+			}
+		}
+	}
+
 	TStaticMeshVertexData<FVector3f> XYZData;
 	XYZData.Assign(XYZBankData);
 	ResultAsset->XYZBank = Easytime::Splat::TSplatStaticBuffer(std::move(XYZData));
@@ -222,7 +328,7 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	SData.Assign(Scales);
 	ResultAsset->Scales = Easytime::Splat::TSplatStaticBuffer(std::move(SData));
 
-	ResultAsset->SetPositionsMeters(std::move(Positions));
+	ResultAsset->SetPositionsMeters(std::move(Positions), QuantMin, QuantMax);
 	ResultAsset->SetCovariancesQuatScaleMeters(Rotations, Scales);
 	ResultAsset->SetColorsLinear(std::move(Colors));
 
@@ -235,6 +341,7 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		return nullptr;
 	}
 
+	static_cast<USplatAsset*>(ResultAsset)->BeginInit();
 	ResultAsset->BeginInit();
 
 	return ResultAsset;

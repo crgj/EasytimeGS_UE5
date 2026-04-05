@@ -47,22 +47,5 @@ IMPLEMENT_GLOBAL_SHADER(
 	"main",
 	SF_Compute);
 
-using FRenderSplatVS_CPURDG = FRenderSplatVS<ESortingDevice::CPU, true>;
-using FRenderSplatVS_GPURDG = FRenderSplatVS<ESortingDevice::GPU, true>;
-
-IMPLEMENT_SHADER_TYPE(
-	template<>,
-	FRenderSplatVS_CPURDG,
-	TEXT("/Plugin/EasytimeSplat/Private/RenderSplatVS.usf"),
-	TEXT("main"),
-	SF_Vertex);
-
-IMPLEMENT_SHADER_TYPE(
-	template<>,
-	FRenderSplatVS_GPURDG,
-	TEXT("/Plugin/EasytimeSplat/Private/RenderSplatVS.usf"),
-	TEXT("main"),
-	SF_Vertex);
-
 } // namespace Easytime::Splat::Shaders
 

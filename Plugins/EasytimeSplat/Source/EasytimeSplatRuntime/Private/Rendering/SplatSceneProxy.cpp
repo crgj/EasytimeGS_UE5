@@ -4,6 +4,7 @@
 
 #include "SplatSceneProxy.h"
 
+#include "Logging.h"
 #include "MaterialDomain.h"
 #include "Materials/MaterialRenderProxy.h"
 #include "PackedTypes.h"
@@ -30,6 +31,14 @@ FSplatSceneProxy::FSplatSceneProxy(USplatComponent& Component)
 #endif
 {
 	bIs4D = Cast<USplat4DAsset>(Asset) != nullptr;
+	bUse4DInterpolation = bIs4D;
+	EASYTIME_LOGL(
+		"[SceneProxy Ctor] Name=%s Is4D=%d Use4DInterp=%d NumSplats=%u SortGPU=%d",
+		*GetResourceName().ToString(),
+		bIs4D ? 1 : 0,
+		bUse4DInterpolation ? 1 : 0,
+		Asset ? Asset->GetNumSplats() : 0,
+		bIsSortingOnGPU ? 1 : 0);
 
 	if (bIsSortingOnGPU)
 	{
@@ -143,6 +152,11 @@ FSplatSceneProxy::GetViewRelevance(const FSceneView* View) const
 void FSplatSceneProxy::CreateRenderThreadResources(
 	FRHICommandListBase& RHICmdList)
 {
+	EASYTIME_LOGL(
+		"[SceneProxy RTR] Name=%s Is4D=%d NumSplats=%u",
+		*GetName(),
+		bIs4D ? 1 : 0,
+		GetNumSplats());
 	if (bIsSortingOnGPU)
 	{
 		Indices->InitRHI(RHICmdList);
@@ -153,7 +167,7 @@ void FSplatSceneProxy::CreateRenderThreadResources(
 	}
 	Transforms.InitRHI(RHICmdList);
 
-	if (bIs4D)
+	if (Uses4DInterpolation())
 	{
 		DynamicPositions.emplace(GetNumSplats(), PF_R32_UINT);
 		DynamicPositions->InitRHI(RHICmdList);
@@ -187,7 +201,7 @@ void FSplatSceneProxy::DestroyRenderThreadResources()
 
 	Transforms.ReleaseResource();
 
-	if (bIs4D)
+	if (Uses4DInterpolation())
 	{
 		DynamicPositions->ReleaseResource();
 		DynamicCovariances->ReleaseResource();

@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "RenderGraphResources.h"
 #include "Containers/Set.h"
 #include "Misc/AssertionMacros.h"
 #include "SceneViewExtension.h"
@@ -12,13 +11,6 @@
 
 namespace Easytime::Splat
 {
-
-struct FInterpolationRDGResources
-{
-	FRDGBufferRef Positions = nullptr;
-	FRDGBufferRef Covariances = nullptr;
-	FRDGBufferRef Colors = nullptr;
-};
 
 /**
  * Extends the Engine's rendering system to support 3DGS.
@@ -39,7 +31,7 @@ public:
 	virtual void
 	SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView) override {};
 	virtual void
-	BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override { InterpolationResources.Empty(); };
+	BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override {};
 
 	/**
 	 * First stage: Enqueue async compute work, to be done before actual
@@ -97,7 +89,6 @@ public:
 private:
 	bool bIsSortingOnGPU;
 	TSet<FSplatSceneProxy*> Proxies;
-	TMap<FSplatSceneProxy*, FInterpolationRDGResources> InterpolationResources;
 };
 
 } // namespace Easytime::Splat

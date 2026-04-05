@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "UObject/UnrealType.h"
 #include "SplatComponent.h"
 #include "Splat4DComponent.generated.h"
 
@@ -26,8 +27,14 @@ public:
 		meta = (ClampMin = "0.0"))
 	float CurrentFrame = 0.0f;
 
+	void ApplyCurrentFrame();
+
 	virtual void TickComponent(
 		float DeltaTime,
 		enum ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 };

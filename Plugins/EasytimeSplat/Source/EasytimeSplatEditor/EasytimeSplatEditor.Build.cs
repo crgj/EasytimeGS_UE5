@@ -16,6 +16,7 @@ public class EasytimeSplatEditor : ModuleRules
 				"AssetDefinition",
 				"Core",
 				"CoreUObject",
+				"Engine",
 				"GeometryCore",
 				"EasytimeSplatRuntime",
 				"EasytimeSplatThirdParty",

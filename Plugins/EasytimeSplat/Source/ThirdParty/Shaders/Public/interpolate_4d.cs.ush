@@ -7,6 +7,7 @@ Buffer<float4> rot_bank;
 Buffer<float3> dc_bank;
 Buffer<float2> lifetime_mu_w;
 Buffer<float3> scales;
+Buffer<uint> base_colors;
 
 float current_frame;
 uint num_xyz_banks;
@@ -56,41 +57,65 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     uint i = dispatch_thread_id.x;
     if (i >= num_splats) return;
 
-    // 1. Lifetime Gating
+    // 1. Lifetime gating
+    // lifetime_mu_w stores (mu, w). Keep splat visible inside [mu - w, mu + w]
+    // with smooth edges; if w is invalid, fall back to fully visible.
     float2 mu_w = lifetime_mu_w[i];
-    float t_delta = current_frame - mu_w.x;
-    float opacity_multiplier = 1.0f / (1.0f + exp(-mu_w.y * t_delta));
+    float mu = mu_w.x;
+    float w = mu_w.y;
+    float opacity_multiplier = 1.0f;
+    if (w > 1e-6f)
+    {
+        const float k = 10.0f;
+        float arg_left = k * (current_frame - (mu - w));
+        float arg_right = -k * (current_frame - (mu + w));
+        float left = 1.0f / (1.0f + exp(-arg_left));
+        float right = 1.0f / (1.0f + exp(-arg_right));
+        opacity_multiplier = saturate(left * right);
+
+        if (current_frame < (mu - w) || current_frame > (mu + w))
+        {
+            opacity_multiplier = 0.0f;
+        }
+    }
     
     // 2. Interpolate XYZ
     uint k_xyz = uint(current_frame) / max(1u, xyz_stride);
     float alpha_xyz = frac(current_frame / float(max(1u, xyz_stride)));
-    k_xyz = min(k_xyz, num_xyz_banks - 2);
-    
-    float3 p0 = xyz_bank[i * num_xyz_banks + k_xyz];
-    float3 p1 = xyz_bank[i * num_xyz_banks + k_xyz + 1];
+    uint k_xyz_0 = 0;
+    uint k_xyz_1 = 0;
+    if (num_xyz_banks > 1u) {
+        k_xyz_0 = min(k_xyz, num_xyz_banks - 2u);
+        k_xyz_1 = k_xyz_0 + 1u;
+    }
+    float3 p0 = xyz_bank[i * num_xyz_banks + k_xyz_0];
+    float3 p1 = xyz_bank[i * num_xyz_banks + k_xyz_1];
     float3 p_interp = lerp(p0, p1, alpha_xyz);
     
     // Pack Position (Z+ forward, X+ right, Y- up -> X+ forward, Y+ right, Z+ up)
     float3 p_ue = float3(p_interp.z, p_interp.x, -p_interp.y);
-    float3 p_norm = (p_ue * 100.0f - pos_min_cm) / pos_scale_cm; // pos_scale_cm typically has (PMax-PMin)*100/UNormMax
-    // Wait, pos_scale_cm in C++: PosScaleCM = MetersToCentimeters * (PosMaxM - PosMinM) / FPackedPos::MAX;
-    // So p_norm should be (P_cm - Min_cm) / (Max_cm - Min_cm)
-    // Actually: (P_meters - Min_meters) / (Max_meters - Min_meters)
-    float3 pos_min_m = pos_min_cm / 100.0f;
-    float3 pos_max_m = (pos_scale_cm * 2047.0f / 100.0f) + pos_min_m; // rough estimation
-    // Let's use the exact packing from C++:
-    // (PositionsMeters[Index] - PosMinM) / (PosMaxM - PosMinM)
-    float3 p_rel = saturate((p_ue - pos_min_m) / (pos_max_m - pos_min_m));
-    uint pack_p = (to_unorm(p_rel.z, 10) << 22) | (to_unorm(p_rel.y, 11) << 11) | to_unorm(p_rel.x, 11);
+    // Match FPackedPos quantization exactly: unpack_pos() does
+    // pos_cm = packed_unorm * pos_scale_cm + pos_min_cm.
+    float3 p_cm = p_ue * 100.0f;
+    float x_q = (p_cm.x - pos_min_cm.x) / max(pos_scale_cm.x, 1e-8f);
+    float y_q = (p_cm.y - pos_min_cm.y) / max(pos_scale_cm.y, 1e-8f);
+    float z_q = (p_cm.z - pos_min_cm.z) / max(pos_scale_cm.z, 1e-8f);
+    uint pack_p = (uint(round(saturate(z_q / 1023.0f) * 1023.0f)) << 22) |
+                  (uint(round(saturate(y_q / 2047.0f) * 2047.0f)) << 11) |
+                  uint(round(saturate(x_q / 2047.0f) * 2047.0f));
     out_positions[i] = pack_p;
 
     // 3. Interpolate Rotation & Scale
     uint k_rot = uint(current_frame) / max(1u, rot_stride);
     float alpha_rot = frac(current_frame / float(max(1u, rot_stride)));
-    k_rot = min(k_rot, num_rot_banks - 2);
-    
-    float4 r0 = rot_bank[i * num_rot_banks + k_rot];
-    float4 r1 = rot_bank[i * num_rot_banks + k_rot + 1];
+    uint k_rot_0 = 0;
+    uint k_rot_1 = 0;
+    if (num_rot_banks > 1u) {
+        k_rot_0 = min(k_rot, num_rot_banks - 2u);
+        k_rot_1 = k_rot_0 + 1u;
+    }
+    float4 r0 = rot_bank[i * num_rot_banks + k_rot_0];
+    float4 r1 = rot_bank[i * num_rot_banks + k_rot_1];
     float4 r_interp = normalize(lerp(r0, r1, alpha_rot)); // Cheap Nlerp
     
     // Swapping handedness for rotation (same as C++ convert_splat)
@@ -131,19 +156,23 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     // 4. Interpolate Color (DC)
     uint k_dc = uint(current_frame) / max(1u, dc_stride);
     float alpha_dc = frac(current_frame / float(max(1u, dc_stride)));
-    k_dc = min(k_dc, num_dc_banks - 2);
-    
-    float3 c0 = dc_bank[i * num_dc_banks + k_dc];
-    float3 c1 = dc_bank[i * num_dc_banks + k_dc + 1];
+    uint k_dc_0 = 0;
+    uint k_dc_1 = 0;
+    if (num_dc_banks > 1u) {
+        k_dc_0 = min(k_dc, num_dc_banks - 2u);
+        k_dc_1 = k_dc_0 + 1u;
+    }
+    float3 c0 = dc_bank[i * num_dc_banks + k_dc_0];
+    float3 c1 = dc_bank[i * num_dc_banks + k_dc_1];
     float3 c_interp = lerp(c0, c1, alpha_dc);
     
     // Convert SH DC to RGB (approx: 0.28209 * SH)
     float3 rgb = max(0, c_interp * 0.28209479177387814f + 0.5f);
+    uint packed_base_color = base_colors[i];
+    float base_alpha = float((packed_base_color >> 24) & 0xFFu) / 255.0f;
     uint r8 = to_unorm(rgb.r, 8);
     uint g8 = to_unorm(rgb.g, 8);
     uint b8 = to_unorm(rgb.b, 8);
-    uint a8 = to_unorm(opacity_multiplier, 8); // Base opacity is 1.0 from import or bank
+    uint a8 = to_unorm(base_alpha * opacity_multiplier, 8);
     out_colors[i] = (a8 << 24) | (b8 << 16) | (g8 << 8) | r8;
 }
-
-

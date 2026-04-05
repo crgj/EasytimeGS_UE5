@@ -92,10 +92,16 @@ public:
 	 */
 	FShaderResourceViewRHIRef GetColorsSRV() const
 	{
-		if (DynamicColors)
+		if (bUse4DInterpolation && DynamicColors)
 		{
 			return DynamicColors->ShaderResourceViewRHI;
 		}
+		check(Asset);
+		return Asset->GetColorsSRV();
+	}
+
+	FShaderResourceViewRHIRef GetAssetColorsSRV() const
+	{
 		check(Asset);
 		return Asset->GetColorsSRV();
 	}
@@ -105,7 +111,7 @@ public:
 	 */
 	FShaderResourceViewRHIRef GetCovariancesSRV() const
 	{
-		if (DynamicCovariances)
+		if (bUse4DInterpolation && DynamicCovariances)
 		{
 			return DynamicCovariances->ShaderResourceViewRHI;
 		}
@@ -145,7 +151,7 @@ public:
 	FShaderResourceViewRHIRef
 	GetPositionsSRV(FVector3f& OutPosMinCM, FVector3f& OutPosScaleCM) const
 	{
-		if (DynamicPositions)
+		if (bUse4DInterpolation && DynamicPositions)
 		{
 			check(Asset);
 			static_cast<void>(
@@ -158,6 +164,7 @@ public:
 
 	// 4DGS Bank Accessors
 	bool Is4D() const { return bIs4D; }
+	bool Uses4DInterpolation() const { return bIs4D && bUse4DInterpolation; }
 	FShaderResourceViewRHIRef GetXYZBankSRV() const;
 	FShaderResourceViewRHIRef GetRotBankSRV() const;
 	FShaderResourceViewRHIRef GetDCBankSRV() const;
@@ -252,6 +259,7 @@ private:
 
 	bool bIsSortingOnGPU;
 	bool bIs4D = false;
+	bool bUse4DInterpolation = false;
 	float CurrentFrame = 0.0f;
 	std::optional<FSplatGPUToGPUBuffer> Indices;
 

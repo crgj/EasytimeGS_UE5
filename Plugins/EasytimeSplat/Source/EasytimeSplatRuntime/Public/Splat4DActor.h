@@ -5,6 +5,7 @@
 #pragma once
 
 #include "GameFramework/Actor.h"
+#include "UObject/UnrealType.h"
 #include "Splat4DComponent.h"
 #include "Splat4DActor.generated.h"
 
@@ -26,11 +27,11 @@ public:
 	virtual void Tick(float DeltaTime) override;
 	virtual bool ShouldTickIfViewportsOnly() const override { return true; }
 
-private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Splat, meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USplat4DComponent> Splat4DComponent;
 
 #if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	friend class UActorFactorySplat4D;
 #endif
 };
