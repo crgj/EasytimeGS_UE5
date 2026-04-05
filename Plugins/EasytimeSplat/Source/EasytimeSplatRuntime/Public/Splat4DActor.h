@@ -21,8 +21,12 @@ public:
 	ASplat4DActor();
 
 	/** Current animation frame for 4D interpolation. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat4D", meta = (ClampMin = "0.0"))
-	float CurrentFrame = 0.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat4D", meta = (ClampMin = "0", UIMin = "0", Delta = "1"))
+	int32 CurrentFrame = 0;
+
+	/** Auto-play one frame every 1/30 second. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Splat4D", meta = (DisplayName = "IsPlay"))
+	bool bIsPlay = false;
 
 	virtual void Tick(float DeltaTime) override;
 	virtual bool ShouldTickIfViewportsOnly() const override { return true; }
@@ -34,6 +38,12 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	friend class UActorFactorySplat4D;
 #endif
+
+private:
+	void ClampCurrentFrameToAsset();
+	void SyncFrameToComponent(bool bMarkRenderStateDirty);
+
+	float PlaybackAccumulator = 0.0f;
 };
 
 

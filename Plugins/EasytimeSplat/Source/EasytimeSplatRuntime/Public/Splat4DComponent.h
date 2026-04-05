@@ -19,13 +19,8 @@ class EASYTIMESPLATRUNTIME_API USplat4DComponent : public USplatComponent
 public:
 	USplat4DComponent();
 
-	/** Current animation frame for 4D interpolation. */
-	UPROPERTY(
-		EditAnywhere,
-		BlueprintReadWrite,
-		Category = "Splat4D",
-		meta = (ClampMin = "0.0"))
-	float CurrentFrame = 0.0f;
+	// Internal frame state; the actor owns the editor-facing playback controls.
+	int32 CurrentFrame = 0;
 
 	void ApplyCurrentFrame();
 

@@ -34,6 +34,6 @@ void UActorFactorySplat4D::PostSpawnActor(UObject* Asset, AActor* NewActor)
 	USplat4DAsset* SplatAsset = CastChecked<USplat4DAsset>(Asset);
 	Splat4DActor->Splat4DComponent->SetAsset(SplatAsset);
 
-	Splat4DActor->CurrentFrame = 0.0f;
-	Splat4DActor->Splat4DComponent->CurrentFrame = 0.0f;
+	Splat4DActor->CurrentFrame = 0;
+	Splat4DActor->Splat4DComponent->CurrentFrame = 0;
 }

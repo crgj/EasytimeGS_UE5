@@ -58,6 +58,6 @@ void USplat4DComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyCh
 	}
 
 	ApplyCurrentFrame();
-	MarkRenderStateDirty();
+	MarkRenderDynamicDataDirty();
 }
 #endif
