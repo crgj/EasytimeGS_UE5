@@ -2,6 +2,8 @@
   Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
 */
 
+#pragma once
+
 #include "RenderGraphResources.h"
 #include "Containers/Set.h"
 #include "Misc/AssertionMacros.h"

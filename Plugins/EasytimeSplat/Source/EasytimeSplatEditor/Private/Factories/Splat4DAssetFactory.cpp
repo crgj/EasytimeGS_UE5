@@ -20,7 +20,7 @@ using Easytime::Splat::MetersToCentimeters;
 
 namespace
 {
-void MaybeAddIndex(TMap<uint32, uint32>& IndexMap, uint32 Index)
+void MaybeAddIndex4D(TMap<uint32, uint32>& IndexMap, uint32 Index)
 {
 	if (!IndexMap.Contains(Index))
 	{
@@ -29,21 +29,21 @@ void MaybeAddIndex(TMap<uint32, uint32>& IndexMap, uint32 Index)
 }
 
 TMap<uint32, uint32>
-RemapIndices(TConstArrayView<UE::Geometry::FIndex3i> Indices)
+RemapIndices4D(TConstArrayView<UE::Geometry::FIndex3i> Indices)
 {
 	TMap<uint32, uint32> IndexMap{};
 
 	for (const auto& Index3 : Indices)
 	{
-		MaybeAddIndex(IndexMap, Index3.A);
-		MaybeAddIndex(IndexMap, Index3.B);
-		MaybeAddIndex(IndexMap, Index3.C);
+		MaybeAddIndex4D(IndexMap, Index3.A);
+		MaybeAddIndex4D(IndexMap, Index3.B);
+		MaybeAddIndex4D(IndexMap, Index3.C);
 	}
 
 	return IndexMap;
 }
 
-bool GenerateConvexHull(
+bool GenerateConvexHull4D(
 	TConstArrayView<FVector3f> Positions,
 	TArray<FVector3f>& OutVertices,
 	TArray<uint32>& OutIndices)
@@ -58,7 +58,7 @@ bool GenerateConvexHull(
 
 	TArray<UE::Geometry::FIndex3i> HullIndices = ConvexHull.MoveTriangles();
 
-	TMap<uint32, uint32> IndexMap = RemapIndices(HullIndices);
+	TMap<uint32, uint32> IndexMap = RemapIndices4D(HullIndices);
 
 	OutIndices.SetNumUninitialized(HullIndices.Num() * 3);
 	for (int32 Index = 0; Index < HullIndices.Num(); ++Index)
@@ -226,7 +226,7 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 	ResultAsset->SetCovariancesQuatScaleMeters(Rotations, Scales);
 	ResultAsset->SetColorsLinear(std::move(Colors));
 
-	if (!GenerateConvexHull(
+	if (!GenerateConvexHull4D(
 			ResultAsset->GetPositions(),
 			ResultAsset->ConvexHullVertices,
 			ResultAsset->ConvexHullIndices))
