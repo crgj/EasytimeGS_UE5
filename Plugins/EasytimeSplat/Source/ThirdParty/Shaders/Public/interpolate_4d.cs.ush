@@ -2,13 +2,7 @@
   Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
 */
 
-Buffer<float3> xyz_bank;
-Buffer<float4> rot_bank;
-Buffer<float3> dc_bank;
-Buffer<float2> lifetime_mu_w;
-Buffer<float3> scales;
-Buffer<float4> base_colors;
-
+// Scalar parameters must come first (matching C++ struct order)
 float current_frame;
 uint num_xyz_banks;
 uint num_rot_banks;
@@ -20,6 +14,15 @@ uint num_splats;
 float3 pos_scale_cm;
 float3 pos_min_cm;
 
+// SRV parameters (second)
+Buffer<float3> xyz_bank;
+Buffer<float4> rot_bank;
+Buffer<float3> dc_bank;
+Buffer<float2> lifetime_mu_w;
+Buffer<float3> scales;
+Buffer<float4> base_colors;
+
+// UAV parameters (third)
 RWBuffer<uint> out_positions;
 RWBuffer<uint2> out_covariances;
 RWBuffer<float4> out_colors;
@@ -33,6 +36,27 @@ uint to_unorm(float f, uint bits) {
 float3 dc_to_linear_rgb(float3 dc) {
     float3 color_srgb = 0.5f + 0.2820948f * dc;
     return saturate(pow(max(color_srgb, 0.0f), 2.2f));
+}
+
+float4 slerp_quat(float4 q0, float4 q1, float t)
+{
+    float cos_theta = dot(q0, q1);
+    if (cos_theta < 0.0f)
+    {
+        q1 = -q1;
+        cos_theta = -cos_theta;
+    }
+
+    if (cos_theta > 0.9995f)
+    {
+        return normalize(lerp(q0, q1, t));
+    }
+
+    float theta = acos(clamp(cos_theta, -1.0f, 1.0f));
+    float sin_theta = sin(theta);
+    float w0 = sin((1.0f - t) * theta) / max(sin_theta, 1e-6f);
+    float w1 = sin(t * theta) / max(sin_theta, 1e-6f);
+    return normalize(q0 * w0 + q1 * w1);
 }
 
 // Float to custom 5e5/5e6 format (simplified for GPU)
@@ -135,12 +159,6 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     float qy = r_interp.y;
     float qz = r_interp.z;
     float qw = r_interp.w;
-    float q_len2 = max(qx * qx + qy * qy + qz * qz + qw * qw, 1e-12f);
-    float q_inv_len = rsqrt(q_len2);
-    qx *= q_inv_len;
-    qy *= q_inv_len;
-    qz *= q_inv_len;
-    qw *= q_inv_len;
     
     // Compute Covariance Sigma = R * S * S^T * R^T
     float3 s = scales[i] * 100.0f; // CM
