@@ -19,6 +19,7 @@ namespace
 TAutoConsoleVariable<int32> CVarSplatGlobalSortExperimental(
 	TEXT("r.EasytimeSplat.GlobalSortExperimental"),
 	1,
+	// WDD-2026-04-06-GlobalSortStagingFlag: Add runtime guard for global per-splat sort migration.
 	TEXT("Enable experimental per-splat global sort pipeline staging.\n")
 	TEXT("0: disabled, 1: enabled (staging only in this revision)."),
 	ECVF_RenderThreadSafe);
@@ -90,9 +91,8 @@ TArray<FSplatSceneProxy*> GetSortedVisibleProxies(
 	const FVector3f ViewOrigin = GetOrigin(View);
 	const FVector3f ViewForward = GetForward(View);
 
-	// Build a conservative per-proxy depth interval, then sort back-to-front.
-	// Using bounds (instead of actor origin) improves cross-actor blending
-	// stability when proxies partially overlap in depth.
+	// WDD-2026-04-06-ProxyDepthRangeSort: Use bounds depth interval instead of actor origin
+	// to reduce cross-actor alpha ordering artifacts before true global per-splat sort is ready.
 	for (FSplatSceneProxy* Proxy : InProxies)
 	{
 		if (!Proxy || !Proxy->IsVisible(View))
@@ -119,13 +119,13 @@ TArray<FSplatSceneProxy*> GetSortedVisibleProxies(
 
 	DepthRanges.Sort([](const FProxyDepthRange& A, const FProxyDepthRange& B)
 	{
-		// Back-to-front by farthest possible depth first.
+		// WDD-2026-04-06-BackToFrontTieBreak: Keep deterministic back-to-front ordering for alpha blending.
 		if (A.FarDepth != B.FarDepth)
 		{
 			return A.FarDepth > B.FarDepth;
 		}
 
-		// Tie-breaker: still prefer deeper near face.
+		// WDD-2026-04-06-BackToFrontTieBreak: Prefer deeper near-face on equal far-depth.
 		return A.NearDepth > B.NearDepth;
 	});
 
