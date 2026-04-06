@@ -16,11 +16,38 @@ namespace Easytime::Splat
 {
 namespace
 {
+TAutoConsoleVariable<int32> CVarSplatGlobalSortExperimental(
+	TEXT("r.EasytimeSplat.GlobalSortExperimental"),
+	1,
+	TEXT("Enable experimental per-splat global sort pipeline staging.\n")
+	TEXT("0: disabled, 1: enabled (staging only in this revision)."),
+	ECVF_RenderThreadSafe);
+
 /**
  * See comment in SplatRendering.cpp.
  */
 BEGIN_SHADER_PARAMETER_STRUCT(FCPUSortRenderProducerParameters, )
 SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, IndicesUAV)
+END_SHADER_PARAMETER_STRUCT()
+
+struct FGlobalVisibleSplatRange
+{
+	FSplatSceneProxy* Proxy = nullptr;
+	uint32 GlobalOffset = 0;
+	uint32 NumSplats = 0;
+};
+
+struct FGlobalSortStagingBuffers
+{
+	FRDGBufferRef GlobalIndices = nullptr;
+	FRDGBufferRef GlobalDistances = nullptr;
+	FRDGBufferRef ProxyRanges = nullptr;
+};
+
+BEGIN_SHADER_PARAMETER_STRUCT(FGlobalSortStagingProducerParameters, )
+SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, GlobalIndicesUAV)
+SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, GlobalDistancesUAV)
+SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, ProxyRangesUAV)
 END_SHADER_PARAMETER_STRUCT()
 
 Shaders::FRenderSplatSharedParameters
@@ -44,6 +71,144 @@ SetSharedParameters(const FSceneView& View, FSplatSceneProxy* Proxy)
 	Params.sh_coefficients = Proxy->GetSHCoefficientsSRV();
 
 	return Params;
+}
+
+TArray<FSplatSceneProxy*> GetSortedVisibleProxies(
+	const TSet<FSplatSceneProxy*>& InProxies,
+	const FSceneView& View)
+{
+	struct FProxyDepthRange
+	{
+		FSplatSceneProxy* Proxy = nullptr;
+		float NearDepth = 0.0f;
+		float FarDepth = 0.0f;
+	};
+
+	TArray<FProxyDepthRange> DepthRanges;
+	DepthRanges.Reserve(InProxies.Num());
+
+	const FVector3f ViewOrigin = GetOrigin(View);
+	const FVector3f ViewForward = GetForward(View);
+
+	// Build a conservative per-proxy depth interval, then sort back-to-front.
+	// Using bounds (instead of actor origin) improves cross-actor blending
+	// stability when proxies partially overlap in depth.
+	for (FSplatSceneProxy* Proxy : InProxies)
+	{
+		if (!Proxy || !Proxy->IsVisible(View))
+		{
+			continue;
+		}
+
+		const FBoxSphereBounds ProxyBounds = Proxy->GetBounds();
+		const FVector3f BoundsOrigin = FVector3f(ProxyBounds.Origin);
+		const FVector3f BoundsExtent = FVector3f(ProxyBounds.BoxExtent);
+		const float Radius =
+			FMath::Sqrt(BoundsExtent.X * BoundsExtent.X +
+			            BoundsExtent.Y * BoundsExtent.Y +
+			            BoundsExtent.Z * BoundsExtent.Z);
+
+		const float CenterDepth =
+			FVector3f::DotProduct(BoundsOrigin - ViewOrigin, ViewForward);
+
+		FProxyDepthRange& Range = DepthRanges.AddDefaulted_GetRef();
+		Range.Proxy = Proxy;
+		Range.NearDepth = CenterDepth - Radius;
+		Range.FarDepth = CenterDepth + Radius;
+	}
+
+	DepthRanges.Sort([](const FProxyDepthRange& A, const FProxyDepthRange& B)
+	{
+		// Back-to-front by farthest possible depth first.
+		if (A.FarDepth != B.FarDepth)
+		{
+			return A.FarDepth > B.FarDepth;
+		}
+
+		// Tie-breaker: still prefer deeper near face.
+		return A.NearDepth > B.NearDepth;
+	});
+
+	TArray<FSplatSceneProxy*> Sorted;
+	Sorted.Reserve(DepthRanges.Num());
+	for (const FProxyDepthRange& Range : DepthRanges)
+	{
+		Sorted.Add(Range.Proxy);
+	}
+
+	return Sorted;
+}
+
+TArray<FGlobalVisibleSplatRange> BuildGlobalVisibleSplatRanges(
+	const TArray<FSplatSceneProxy*>& SortedVisibleProxies,
+	uint32& OutTotalVisibleSplats)
+{
+	OutTotalVisibleSplats = 0;
+
+	TArray<FGlobalVisibleSplatRange> Ranges;
+	Ranges.Reserve(SortedVisibleProxies.Num());
+
+	for (FSplatSceneProxy* Proxy : SortedVisibleProxies)
+	{
+		if (!Proxy)
+		{
+			continue;
+		}
+
+		const uint32 NumSplats = Proxy->GetNumSplats();
+		if (NumSplats == 0)
+		{
+			continue;
+		}
+
+		FGlobalVisibleSplatRange& Range = Ranges.AddDefaulted_GetRef();
+		Range.Proxy = Proxy;
+		Range.GlobalOffset = OutTotalVisibleSplats;
+		Range.NumSplats = NumSplats;
+
+		OutTotalVisibleSplats += NumSplats;
+	}
+
+	return Ranges;
+}
+
+FGlobalSortStagingBuffers CreateGlobalSortStagingBuffers(
+	FRDGBuilder& GraphBuilder,
+	uint32 TotalVisibleSplats,
+	uint32 NumVisibleProxies)
+{
+	FGlobalSortStagingBuffers Buffers;
+	if (TotalVisibleSplats == 0 || NumVisibleProxies == 0)
+	{
+		return Buffers;
+	}
+
+	Buffers.GlobalIndices = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), TotalVisibleSplats),
+		TEXT("EasytimeSplat.GlobalSort.Indices"));
+	Buffers.GlobalDistances = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), TotalVisibleSplats),
+		TEXT("EasytimeSplat.GlobalSort.Distances"));
+	Buffers.ProxyRanges = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(uint32) * 2, NumVisibleProxies),
+		TEXT("EasytimeSplat.GlobalSort.ProxyRanges"));
+
+	FGlobalSortStagingProducerParameters* Params =
+		GraphBuilder.AllocParameters<FGlobalSortStagingProducerParameters>();
+	Params->GlobalIndicesUAV =
+		GraphBuilder.CreateUAV(Buffers.GlobalIndices, PF_R32_UINT);
+	Params->GlobalDistancesUAV =
+		GraphBuilder.CreateUAV(Buffers.GlobalDistances, PF_R32_UINT);
+	Params->ProxyRangesUAV =
+		GraphBuilder.CreateUAV(Buffers.ProxyRanges, PF_R32G32_UINT);
+
+	GraphBuilder.AddPass(
+		RDG_EVENT_NAME("Splat: GlobalSort Staging Producer"),
+		Params,
+		ERDGPassFlags::Compute,
+		[](FRHIComputeCommandList& RHICmdList) {});
+
+	return Buffers;
 }
 } // namespace
 
@@ -84,7 +249,28 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 		return;
 	}
 
-	for (auto& Proxy : Proxies)
+	const TArray<FSplatSceneProxy*> SortedProxies = GetSortedVisibleProxies(Proxies, View);
+	uint32 TotalVisibleSplats = 0;
+	const TArray<FGlobalVisibleSplatRange> GlobalRanges =
+		BuildGlobalVisibleSplatRanges(SortedProxies, TotalVisibleSplats);
+	const bool bEnableGlobalSortStaging =
+		CVarSplatGlobalSortExperimental.GetValueOnRenderThread() != 0;
+	if (bEnableGlobalSortStaging && GlobalRanges.Num() > 1)
+	{
+		const FGlobalSortStagingBuffers GlobalSortBuffers =
+			CreateGlobalSortStagingBuffers(
+				GraphBuilder, TotalVisibleSplats, GlobalRanges.Num());
+
+		EASYTIME_LOGL(
+			"[GlobalSort Stage] VisibleProxies=%d TotalVisibleSplats=%u Buffers=%d",
+			GlobalRanges.Num(),
+			TotalVisibleSplats,
+			(GlobalSortBuffers.GlobalIndices && GlobalSortBuffers.GlobalDistances &&
+			 GlobalSortBuffers.ProxyRanges)
+				? 1
+				: 0);
+	}
+	for (FSplatSceneProxy* Proxy : SortedProxies)
 	{
 		check(Proxy);
 		if (Proxy->Is4D())
@@ -157,7 +343,8 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 	const FSceneView& View,
 	const FPostProcessingInputs& Inputs)
 {
-	for (auto& Proxy : Proxies)
+	const TArray<FSplatSceneProxy*> SortedProxies = GetSortedVisibleProxies(Proxies, View);
+	for (FSplatSceneProxy* Proxy : SortedProxies)
 	{
 		check(Proxy);
 		if (Proxy->Is4D())
@@ -264,7 +451,8 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 void FSplatSceneViewExtension::PostRenderBasePassMobile_RenderThread(
 	FRHICommandList& RHICmdList, FSceneView& InView)
 {
-	for (auto& Proxy : Proxies)
+	const TArray<FSplatSceneProxy*> SortedProxies = GetSortedVisibleProxies(Proxies, InView);
+	for (FSplatSceneProxy* Proxy : SortedProxies)
 	{
 		check(Proxy);
 

@@ -162,6 +162,21 @@ SplatRadius=TwoSqrt2           ; 高斯半径 (2√2σ 或 3σ)
 
 ---
 
+## 更新日志
+
+### v1.1 (2025-04)
+- **RDG 渲染架构优化** - 重构 Render Dependency Graph 资源管理，提升多 Pass 渲染稳定性
+- **Shader 参数系统重构** - 优化着色器参数绑定机制，解决 4D 插值阶段的字段冲突问题
+- **4DGS 渲染管线优化** - 改进动态位置/协方差数据上传，减少 GPU 内存占用
+
+### v1.0 (2025-03)
+- 基于 PICO Splat 框架首次集成 4D Gaussian Splatting
+- 支持 `.ply4` 格式导入和 GPU 实时帧插值
+- 实现 Actor Scale3D 对高斯对象的正确影响
+- 新增整体 Opacity 透明度控制
+
+---
+
 ## 许可
 
 基于 [PICO Splat](https://github.com/Pico-Developer/splat) 开发，遵循原始项目许可协议。
