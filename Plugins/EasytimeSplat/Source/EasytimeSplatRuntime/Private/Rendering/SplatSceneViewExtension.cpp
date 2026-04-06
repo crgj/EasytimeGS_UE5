@@ -34,6 +34,7 @@ SetSharedParameters(const FSceneView& View, FSplatSceneProxy* Proxy)
 	Params.local_to_world = FMatrix44f(Proxy->GetLocalToWorld());
 	Params.sh_degree = Proxy->GetSelectedSHDegree();
 	Params.sh_num_triplets = Proxy->GetNumSHTriplets();
+	Params.opacity = Proxy->GetOpacity();
 	FVector3f PosMinCM, PosScaleCM;
 	Params.Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	Params.Positions.pos_min_cm = PosMinCM;

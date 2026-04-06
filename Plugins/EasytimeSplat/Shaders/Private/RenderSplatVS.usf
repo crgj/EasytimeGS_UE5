@@ -10,7 +10,11 @@
 
 #define WITH_VIEW_ID USE_MULTI_VIEW_ID_SV
 
+// Scalar parameters - must match C++ struct order in FRenderSplatSharedParameters
 float4x4 local_to_world;
+uint sh_degree;
+uint sh_num_triplets;
+float opacity;
 float3 pos_scale_cm;
 float3 pos_min_cm;
 

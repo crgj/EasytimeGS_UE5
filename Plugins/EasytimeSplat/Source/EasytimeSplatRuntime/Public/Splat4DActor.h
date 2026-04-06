@@ -41,10 +41,22 @@ public:
 			ToolTip = "0 = DC only, 1 = SH1, 2 = SH2, 3 = SH3. The runtime will clamp to the highest order actually stored in the asset."))
 	int32 MaxSHDegree = 3;
 
+	/** Overall opacity multiplier for all splats (0 = invisible, 1 = fully opaque). */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Splat 4D",
+		meta = (
+			ClampMin = "0",
+			ClampMax = "1",
+			UIMin = "0",
+			UIMax = "1"))
+	float Opacity = 1.0f;
+
 	virtual void Tick(float DeltaTime) override;
 	virtual bool ShouldTickIfViewportsOnly() const override { return true; }
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Splat, meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Splat 4D", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USplat4DComponent> Splat4DComponent;
 
 #if WITH_EDITOR

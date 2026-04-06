@@ -197,6 +197,9 @@ public:
 	void SetCurrentFrame_RenderThread(float InFrame) { CurrentFrame = InFrame; }
 	float GetCurrentFrame() const { return CurrentFrame; }
 
+	void SetOpacity_RenderThread(float InOpacity) { Opacity = FMath::Clamp(InOpacity, 0.0f, 1.0f); }
+	float GetOpacity() const { return Opacity; }
+
 	FUnorderedAccessViewRHIRef GetDynamicPositionsUAV() const
 	{
 		return DynamicPositions->UnorderedAccessViewRHI;
@@ -277,6 +280,7 @@ private:
 	bool bUse4DInterpolation = false;
 	uint32 SelectedSHDegree = 0;
 	float CurrentFrame = 0.0f;
+	float Opacity = 1.0f;
 	std::optional<FSplatGPUToGPUBuffer> Indices;
 
 	std::optional<FSplatGPUToGPUBuffer> DynamicPositions;

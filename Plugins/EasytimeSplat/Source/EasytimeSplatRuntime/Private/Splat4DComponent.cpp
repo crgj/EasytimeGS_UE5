@@ -31,10 +31,15 @@ void USplat4DComponent::ApplyCurrentFrame()
 			}
 		}
 
+		float OpacityValue = Opacity;
+
 		ENQUEUE_RENDER_COMMAND(UpdateSplat4DFrame)(
 			[Proxy = (Easytime::Splat::FSplatSceneProxy*)SceneProxy,
-		     Frame](FRHICommandListImmediate& RHICmdList)
-			{ Proxy->SetCurrentFrame_RenderThread(Frame); });
+		     Frame, OpacityValue](FRHICommandListImmediate& RHICmdList)
+			{ 
+				Proxy->SetCurrentFrame_RenderThread(Frame); 
+				Proxy->SetOpacity_RenderThread(OpacityValue);
+			});
 	}
 }
 
@@ -50,14 +55,19 @@ void USplat4DComponent::TickComponent(
 #if WITH_EDITOR
 void USplat4DComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
-	Super::PostEditChangeProperty(PropertyChangedEvent);
+	// Don't call Super::PostEditChangeProperty to avoid MarkRenderStateDirty() which recreates SceneProxy
 
-	if (ASplat4DActor* OwnerActor = Cast<ASplat4DActor>(GetOwner()))
+	// Only sync frame back to actor if frame property changed (avoid loops)
+	if (PropertyChangedEvent.Property &&
+		PropertyChangedEvent.Property->GetFName() == GET_MEMBER_NAME_CHECKED(USplat4DComponent, CurrentFrame))
 	{
-		OwnerActor->CurrentFrame = CurrentFrame;
+		if (ASplat4DActor* OwnerActor = Cast<ASplat4DActor>(GetOwner()))
+		{
+			OwnerActor->CurrentFrame = CurrentFrame;
+		}
 	}
 
 	ApplyCurrentFrame();
-	MarkRenderDynamicDataDirty();
+	// Don't call MarkRenderDynamicDataDirty here - ApplyCurrentFrame already enqueues render command
 }
 #endif

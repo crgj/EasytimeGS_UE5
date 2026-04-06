@@ -112,6 +112,7 @@ SHADER_PARAMETER_STRUCT_REF(
 SHADER_PARAMETER(FMatrix44f, local_to_world)
 SHADER_PARAMETER(uint32, sh_degree)
 SHADER_PARAMETER(uint32, sh_num_triplets)
+SHADER_PARAMETER(float, opacity)
 SHADER_PARAMETER_STRUCT_INCLUDE(FPackedPositionParameters, Positions)
 SHADER_PARAMETER_SRV(Buffer<float4>, transforms)
 SHADER_PARAMETER_SRV(Buffer<float4>, colors)

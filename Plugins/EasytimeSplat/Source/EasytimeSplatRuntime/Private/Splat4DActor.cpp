@@ -41,14 +41,14 @@ void ASplat4DActor::SyncPropertiesToComponent(bool bRecreateRenderState)
 	{
 		Splat4DComponent->SetMaxSHDegree(MaxSHDegree);
 		Splat4DComponent->CurrentFrame = CurrentFrame;
+		Splat4DComponent->Opacity = Opacity;
 		Splat4DComponent->ApplyCurrentFrame();
+		
+		// Only recreate render state for structural changes
+		// Opacity/Frame changes are handled via ApplyCurrentFrame's render command
 		if (bRecreateRenderState)
 		{
 			Splat4DComponent->RecreateRenderState_Concurrent();
-		}
-		else
-		{
-			Splat4DComponent->MarkRenderDynamicDataDirty();
 		}
 	}
 }
@@ -94,7 +94,19 @@ void ASplat4DActor::PostEditChangeProperty(FPropertyChangedEvent& PropertyChange
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	PlaybackAccumulator = 0.0f;
-	SyncPropertiesToComponent(true);
+
+	// Only recreate render state for structural changes, not for dynamic properties
+	bool bNeedsRecreateRenderState = false;
+	if (PropertyChangedEvent.Property)
+	{
+		FName PropertyName = PropertyChangedEvent.Property->GetFName();
+		if (PropertyName == GET_MEMBER_NAME_CHECKED(ASplat4DActor, MaxSHDegree))
+		{
+			bNeedsRecreateRenderState = true;
+		}
+	}
+	
+	SyncPropertiesToComponent(bNeedsRecreateRenderState);
 }
 #endif
 

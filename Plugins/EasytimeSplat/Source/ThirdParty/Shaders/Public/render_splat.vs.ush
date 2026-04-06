@@ -26,9 +26,6 @@ Buffer<half4> transforms;
 Buffer<float4> colors;
 Buffer<float3> sh_coefficients;
 
-uint sh_degree;
-uint sh_num_triplets;
-
 static const float SH_C1 = 0.4886025119029199f;
 static const float SH_C2_0 = 1.0925484305920792f;
 static const float SH_C2_1 = -1.0925484305920792f;
@@ -198,5 +195,6 @@ void main(in uint in_id : SV_VertexID,
   view_dir_src *= rsqrt(max(dot(view_dir_src, view_dir_src), 1e-8f));
 
   base_color.rgb = max(base_color.rgb + eval_sh(splat_id, view_dir_src), 0.0f);
+  base_color.a *= opacity;
   out_color = base_color;
 }

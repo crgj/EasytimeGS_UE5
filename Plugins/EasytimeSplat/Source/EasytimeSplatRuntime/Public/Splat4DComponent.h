@@ -22,6 +22,9 @@ public:
 	// Internal frame state; the actor owns the editor-facing playback controls.
 	int32 CurrentFrame = 0;
 
+	/** Overall opacity multiplier applied to all splats during rendering. */
+	float Opacity = 1.0f;
+
 	void ApplyCurrentFrame();
 
 	virtual void TickComponent(
