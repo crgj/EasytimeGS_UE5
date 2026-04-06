@@ -1,0 +1,15 @@
+/*
+  Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
+*/
+
+[numthreads(THREAD_GROUP_SIZE_X, 1, 1)] void main(
+    uint3 dispatch_thread_id : SV_DispatchThreadID) {
+  uint local_id = dispatch_thread_id.x;
+  if (local_id >= num_splats) {
+    return;
+  }
+
+  uint global_id = global_offset + local_id;
+  out_global_indices[global_id] = global_id;
+  out_global_distances[global_id] = local_distances[local_id];
+}

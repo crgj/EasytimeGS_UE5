@@ -90,7 +90,10 @@ FRDGPassRef CalculateDistances(
 		GraphBuilder,
 		RDG_EVENT_NAME(
 			"Splat: Distances %s", *Proxy->GetResourceName().ToString()),
-		ERDGPassFlags::AsyncCompute,
+		// WDD-2026-04-06-GlobalSortCorrectness-UpgradeComment:GlobalSortStep4-v3
+		// Use Compute (not AsyncCompute) to avoid cross-queue ordering hazards
+		// while global gather/sort consumes freshly written per-proxy data.
+		ERDGPassFlags::Compute,
 		DistanceShader,
 		DistanceParams,
 		FIntVector(NumThreadGroups(Proxy->GetNumSplats()), 1, 1));
@@ -146,7 +149,10 @@ FRDGPassRef Interpolate4D(
 		GraphBuilder,
 		RDG_EVENT_NAME(
 			"Splat: Interpolate4D %s", *Proxy->GetResourceName().ToString()),
-		ERDGPassFlags::AsyncCompute,
+		// WDD-2026-04-06-GlobalSortCorrectness-UpgradeComment:GlobalSortStep4-v3
+		// Keep interpolation on the same queue for deterministic producer-consumer
+		// ordering in the global sort pipeline.
+		ERDGPassFlags::Compute,
 		InterpolateShader,
 		Params,
 		FIntVector(NumThreadGroups(Proxy->GetNumSplats()), 1, 1));
@@ -210,7 +216,10 @@ FRDGPassRef ComputeTransforms(
 		GraphBuilder,
 		RDG_EVENT_NAME(
 			"Splat: Transform %s", *Proxy->GetResourceName().ToString()),
-		ERDGPassFlags::AsyncCompute,
+		// WDD-2026-04-06-GlobalSortCorrectness-UpgradeComment:GlobalSortStep4-v3
+		// Keep transform production ordered before global gather to avoid reading
+		// stale transform buffers under multi-proxy load.
+		ERDGPassFlags::Compute,
 		TransformShader,
 		TransformParams,
 		FIntVector(NumThreadGroups(Proxy->GetNumSplats()), 1, 1));
@@ -429,5 +438,247 @@ FRDGPassRef SortSplats(
 				GMaxRHIFeatureLevel);
 			check(ResultIndex == 0);
 		});
+}
+
+FRDGPassRef AppendLocalSortToGlobal(
+	FRDGBuilder& GraphBuilder,
+	uint32 GlobalOffset,
+	uint32 NumSplats,
+	FRDGBufferRef LocalDistances,
+	FRDGBufferRef GlobalIndices,
+	FRDGBufferRef GlobalDistances)
+{
+	check(LocalDistances);
+	check(GlobalIndices);
+	check(GlobalDistances);
+
+	const FGlobalShaderMap* GlobalShaderMap =
+		GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderRef<Shaders::FCopyLocalSortToGlobalCS> CopyShader =
+		GlobalShaderMap->GetShader<Shaders::FCopyLocalSortToGlobalCS>();
+
+	Shaders::FCopyLocalSortToGlobalCS::FParameters* Params =
+		GraphBuilder
+			.AllocParameters<Shaders::FCopyLocalSortToGlobalCS::FParameters>();
+	Params->global_offset = GlobalOffset;
+	Params->num_splats = NumSplats;
+	Params->local_distances =
+		GraphBuilder.CreateSRV(LocalDistances, PF_R16_UINT);
+	Params->out_global_indices =
+		GraphBuilder.CreateUAV(GlobalIndices, PF_R32_UINT);
+	Params->out_global_distances =
+		GraphBuilder.CreateUAV(GlobalDistances, PF_R32_UINT);
+
+	return FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("Splat: AppendLocalSortToGlobal"),
+		ERDGPassFlags::Compute,
+		CopyShader,
+		Params,
+		FIntVector(NumThreadGroups(NumSplats), 1, 1));
+}
+
+FRDGPassRef SortGlobalSplats(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef GlobalIndices,
+	FRDGBufferRef GlobalDistances,
+	uint32 TotalVisibleSplats)
+{
+	check(GlobalIndices);
+	check(GlobalDistances);
+
+	FRDGBuffer* Indices2 = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), TotalVisibleSplats),
+		TEXT("GlobalIndices2"));
+	FRDGBuffer* Distances2 = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), TotalVisibleSplats),
+		TEXT("GlobalDistances2"));
+
+	FGPUSortProducerParameters* SetupParameters =
+		GraphBuilder.AllocParameters<FGPUSortProducerParameters>();
+	SetupParameters->IndicesUAV =
+		GraphBuilder.CreateUAV(GlobalIndices, PF_R32_UINT);
+	SetupParameters->Indices2UAV =
+		GraphBuilder.CreateUAV(Indices2, PF_R32_UINT);
+	SetupParameters->Distances2UAV =
+		GraphBuilder.CreateUAV(Distances2, PF_R32_UINT);
+
+	GraphBuilder.AddPass(
+		RDG_EVENT_NAME("Splat: GlobalSort RDG Producer"),
+		SetupParameters,
+		ERDGPassFlags::Compute,
+		[](FRHIComputeCommandList& RHICmdList) {});
+
+	FGPUSortParameters* SortParameters =
+		GraphBuilder.AllocParameters<FGPUSortParameters>();
+	SortParameters->IndicesSRV =
+		GraphBuilder.CreateSRV(GlobalIndices, PF_R32_UINT);
+	SortParameters->IndicesUAV =
+		GraphBuilder.CreateUAV(GlobalIndices, PF_R32_UINT);
+	SortParameters->Indices2SRV = GraphBuilder.CreateSRV(Indices2, PF_R32_UINT);
+	SortParameters->Indices2UAV = GraphBuilder.CreateUAV(Indices2, PF_R32_UINT);
+	SortParameters->DistancesSRV =
+		GraphBuilder.CreateSRV(GlobalDistances, PF_R32_UINT);
+	SortParameters->DistancesUAV =
+		GraphBuilder.CreateUAV(GlobalDistances, PF_R32_UINT);
+	SortParameters->Distances2SRV =
+		GraphBuilder.CreateSRV(Distances2, PF_R32_UINT);
+	SortParameters->Distances2UAV =
+		GraphBuilder.CreateUAV(Distances2, PF_R32_UINT);
+
+	return GraphBuilder.AddPass(
+		RDG_EVENT_NAME("Splat: GlobalSort"),
+		SortParameters,
+		ERDGPassFlags::Compute | ERDGPassFlags::NeverCull,
+		[TotalVisibleSplats, SortParameters](
+			FRHIComputeCommandList& RHICmdList)
+		{
+			FGPUSortBuffers SortBuffers;
+			SortBuffers.RemoteKeySRVs[0] =
+				SortParameters->DistancesSRV->GetRHI();
+			SortBuffers.RemoteKeySRVs[1] =
+				SortParameters->Distances2SRV->GetRHI();
+			SortBuffers.RemoteKeyUAVs[0] =
+				SortParameters->DistancesUAV->GetRHI();
+			SortBuffers.RemoteKeyUAVs[1] =
+				SortParameters->Distances2UAV->GetRHI();
+			SortBuffers.RemoteValueSRVs[0] =
+				SortParameters->IndicesSRV->GetRHI();
+			SortBuffers.RemoteValueSRVs[1] =
+				SortParameters->Indices2SRV->GetRHI();
+			SortBuffers.RemoteValueUAVs[0] =
+				SortParameters->IndicesUAV->GetRHI();
+			SortBuffers.RemoteValueUAVs[1] =
+				SortParameters->Indices2UAV->GetRHI();
+
+			// WDD-2026-04-06-GlobalDepthMask32-UpgradeComment:GlobalSortStep4-v4
+			// Global sort uses 32-bit depth keys; using 16-bit mask aliases keys
+			// across many splats and causes severe cross-actor ordering artifacts.
+			constexpr uint32 GlobalDepthMask32 = 0xFFFFFFFFu;
+			int32 ResultIndex = SortGPUBuffers(
+				static_cast<FRHICommandList&>(RHICmdList),
+				SortBuffers,
+				0,
+				GlobalDepthMask32,
+				TotalVisibleSplats,
+				GMaxRHIFeatureLevel);
+			check(ResultIndex == 0);
+		});
+}
+
+FRDGPassRef GatherProxyRenderDataToGlobal(
+	FRDGBuilder& GraphBuilder,
+	const FSceneView& View,
+	FSplatSceneProxy* Proxy,
+	uint32 GlobalOffset,
+	uint32 NumSplats,
+	FRDGBufferRef GlobalIndices,
+	FRDGBufferRef GlobalDistances,
+	FRDGBufferRef GlobalWorldCenters,
+	FRDGBufferRef GlobalTransforms,
+	FRDGBufferRef GlobalColors)
+{
+	check(Proxy);
+	check(GlobalIndices);
+	check(GlobalDistances);
+	check(GlobalWorldCenters);
+	check(GlobalTransforms);
+	check(GlobalColors);
+
+	const FGlobalShaderMap* GlobalShaderMap =
+		GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderRef<Shaders::FGatherProxyRenderDataToGlobalCS> GatherShader =
+		GlobalShaderMap->GetShader<Shaders::FGatherProxyRenderDataToGlobalCS>();
+
+	Shaders::FGatherProxyRenderDataToGlobalCS::FParameters* Params =
+		GraphBuilder.AllocParameters<
+			Shaders::FGatherProxyRenderDataToGlobalCS::FParameters>();
+	Params->local_to_world = FMatrix44f(Proxy->GetLocalToWorld());
+	Params->local_to_clip = FMatrix44f(Proxy->GetLocalToWorld() * GetViewProj(View));
+	Params->global_offset = GlobalOffset;
+	Params->num_splats = NumSplats;
+	Params->opacity = Proxy->GetOpacity();
+	FVector3f PosMinCM, PosScaleCM;
+	Params->Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
+	Params->Positions.pos_min_cm = PosMinCM;
+	Params->Positions.pos_scale_cm = PosScaleCM;
+	Params->transforms = Proxy->GetTransformsSRV();
+	Params->colors = Proxy->GetColorsSRV();
+	Params->out_global_indices =
+		GraphBuilder.CreateUAV(GlobalIndices, PF_R32_UINT);
+	Params->out_global_distances =
+		GraphBuilder.CreateUAV(GlobalDistances, PF_R32_UINT);
+	Params->out_global_world_centers =
+		GraphBuilder.CreateUAV(GlobalWorldCenters, PF_A32B32G32R32F);
+	Params->out_global_transforms =
+		GraphBuilder.CreateUAV(GlobalTransforms, PF_A32B32G32R32F);
+	Params->out_global_colors =
+		GraphBuilder.CreateUAV(GlobalColors, PF_A32B32G32R32F);
+
+	return FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("Splat: GatherProxyRenderDataToGlobal"),
+		ERDGPassFlags::Compute,
+		GatherShader,
+		Params,
+		FIntVector(NumThreadGroups(NumSplats), 1, 1));
+}
+
+void RenderGlobalSplats(
+	FRHICommandList& RHICmdList,
+	FRenderGlobalSplatDeps* Parameters,
+	uint32 TotalVisibleSplats,
+	const FSceneView& View)
+{
+	check(Parameters);
+
+	const FGlobalShaderMap* GlobalShaderMap =
+		GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderRef<Shaders::FRenderGlobalSplatVS> VertexShader =
+		GlobalShaderMap->GetShader<Shaders::FRenderGlobalSplatVS>();
+	TShaderRef<Shaders::FRenderSplatPS> PixelShader =
+		GlobalShaderMap->GetShader<Shaders::FRenderSplatPS>();
+
+	check(View.bIsViewInfo);
+	const FIntRect ViewRect = static_cast<const FViewInfo&>(View).ViewRect;
+	RHICmdList.SetViewport(
+		float(ViewRect.Min.X),
+		float(ViewRect.Min.Y),
+		0.f,
+		float(ViewRect.Max.X),
+		float(ViewRect.Max.Y),
+		1.f);
+
+	FGraphicsPipelineStateInitializer GraphicsPSOInit;
+	GraphicsPSOInit.PrimitiveType = PT_TriangleList;
+	GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI =
+		PipelineStateCache::GetOrCreateVertexDeclaration({});
+	GraphicsPSOInit.BoundShaderState.VertexShaderRHI =
+		VertexShader.GetVertexShader();
+	GraphicsPSOInit.BoundShaderState.PixelShaderRHI =
+		PixelShader.GetPixelShader();
+	GraphicsPSOInit.DepthStencilState =
+		TStaticDepthStencilState<false>::GetRHI();
+	GraphicsPSOInit.RasterizerState = TStaticRasterizerState<>::GetRHI();
+	GraphicsPSOInit.BlendState = TStaticBlendState<
+		CW_RGBA,
+		BO_Add,
+		BF_SourceAlpha,
+		BF_InverseSourceAlpha>::GetRHI();
+	RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
+
+	SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
+	SetShaderParameters(
+		RHICmdList,
+		VertexShader,
+		VertexShader.GetVertexShader(),
+		Parameters->VS);
+	SetShaderParameters(
+		RHICmdList,
+		PixelShader,
+		PixelShader.GetPixelShader(),
+		Parameters->PS);
+
+	RHICmdList.DrawPrimitive(0, 2 * TotalVisibleSplats, 1);
 }
 } // namespace Easytime::Splat

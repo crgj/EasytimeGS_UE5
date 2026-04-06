@@ -1,0 +1,13 @@
+/*
+  Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
+*/
+
+#include "/Engine/Public/Platform.ush"
+
+uint global_offset;
+uint num_splats;
+Buffer<uint> local_distances;
+RWBuffer<uint> out_global_indices;
+RWBuffer<uint> out_global_distances;
+
+#include "../ThirdParty/Public/copy_local_sort_to_global.cs.ush"

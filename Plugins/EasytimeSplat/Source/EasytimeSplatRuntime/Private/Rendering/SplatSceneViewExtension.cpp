@@ -19,7 +19,8 @@ namespace
 TAutoConsoleVariable<int32> CVarSplatGlobalSortExperimental(
 	TEXT("r.EasytimeSplat.GlobalSortExperimental"),
 	1,
-	// WDD-2026-04-06-GlobalSortStagingFlag: Add runtime guard for global per-splat sort migration.
+	// WDD-2026-04-06-GlobalSortStagingFlag-UpgradeComment:GlobalSortStep3-v1
+	// Add runtime guard for global per-splat sort migration.
 	TEXT("Enable experimental per-splat global sort pipeline staging.\n")
 	TEXT("0: disabled, 1: enabled (staging only in this revision)."),
 	ECVF_RenderThreadSafe);
@@ -43,6 +44,14 @@ struct FGlobalSortStagingBuffers
 	FRDGBufferRef GlobalIndices = nullptr;
 	FRDGBufferRef GlobalDistances = nullptr;
 	FRDGBufferRef ProxyRanges = nullptr;
+	FRDGBufferRef GlobalWorldCenters = nullptr;
+	FRDGBufferRef GlobalTransforms = nullptr;
+	FRDGBufferRef GlobalColors = nullptr;
+	bool IsValid() const
+	{
+		return GlobalIndices && GlobalDistances && ProxyRanges &&
+		       GlobalWorldCenters && GlobalTransforms && GlobalColors;
+	}
 };
 
 BEGIN_SHADER_PARAMETER_STRUCT(FGlobalSortStagingProducerParameters, )
@@ -50,6 +59,16 @@ SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, GlobalIndicesUAV)
 SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, GlobalDistancesUAV)
 SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, ProxyRangesUAV)
 END_SHADER_PARAMETER_STRUCT()
+
+BEGIN_SHADER_PARAMETER_STRUCT(FUploadProxyRangesParameters, )
+SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, ProxyRangesUAV)
+END_SHADER_PARAMETER_STRUCT()
+
+struct FProxyRangeGPUEntry
+{
+	uint32 GlobalOffset = 0;
+	uint32 NumSplats = 0;
+};
 
 Shaders::FRenderSplatSharedParameters
 SetSharedParameters(const FSceneView& View, FSplatSceneProxy* Proxy)
@@ -91,7 +110,8 @@ TArray<FSplatSceneProxy*> GetSortedVisibleProxies(
 	const FVector3f ViewOrigin = GetOrigin(View);
 	const FVector3f ViewForward = GetForward(View);
 
-	// WDD-2026-04-06-ProxyDepthRangeSort: Use bounds depth interval instead of actor origin
+	// WDD-2026-04-06-ProxyDepthRangeSort-UpgradeComment:GlobalSortStep3-v1
+	// Use bounds depth interval instead of actor origin
 	// to reduce cross-actor alpha ordering artifacts before true global per-splat sort is ready.
 	for (FSplatSceneProxy* Proxy : InProxies)
 	{
@@ -119,13 +139,15 @@ TArray<FSplatSceneProxy*> GetSortedVisibleProxies(
 
 	DepthRanges.Sort([](const FProxyDepthRange& A, const FProxyDepthRange& B)
 	{
-		// WDD-2026-04-06-BackToFrontTieBreak: Keep deterministic back-to-front ordering for alpha blending.
+		// WDD-2026-04-06-BackToFrontTieBreak-UpgradeComment:GlobalSortStep3-v1
+		// Keep deterministic back-to-front ordering for alpha blending.
 		if (A.FarDepth != B.FarDepth)
 		{
 			return A.FarDepth > B.FarDepth;
 		}
 
-		// WDD-2026-04-06-BackToFrontTieBreak: Prefer deeper near-face on equal far-depth.
+		// WDD-2026-04-06-BackToFrontTieBreak-UpgradeComment:GlobalSortStep3-v1
+		// Prefer deeper near-face on equal far-depth.
 		return A.NearDepth > B.NearDepth;
 	});
 
@@ -150,7 +172,7 @@ TArray<FGlobalVisibleSplatRange> BuildGlobalVisibleSplatRanges(
 
 	for (FSplatSceneProxy* Proxy : SortedVisibleProxies)
 	{
-		if (!Proxy)
+		if (!Proxy || !Proxy->IsSortingOnGPU())
 		{
 			continue;
 		}
@@ -192,6 +214,15 @@ FGlobalSortStagingBuffers CreateGlobalSortStagingBuffers(
 	Buffers.ProxyRanges = GraphBuilder.CreateBuffer(
 		FRDGBufferDesc::CreateBufferDesc(sizeof(uint32) * 2, NumVisibleProxies),
 		TEXT("EasytimeSplat.GlobalSort.ProxyRanges"));
+	Buffers.GlobalWorldCenters = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(float) * 4, TotalVisibleSplats),
+		TEXT("EasytimeSplat.GlobalSort.WorldCenters"));
+	Buffers.GlobalTransforms = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(float) * 4, TotalVisibleSplats),
+		TEXT("EasytimeSplat.GlobalSort.Transforms"));
+	Buffers.GlobalColors = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateBufferDesc(sizeof(float) * 4, TotalVisibleSplats),
+		TEXT("EasytimeSplat.GlobalSort.Colors"));
 
 	FGlobalSortStagingProducerParameters* Params =
 		GraphBuilder.AllocParameters<FGlobalSortStagingProducerParameters>();
@@ -209,6 +240,57 @@ FGlobalSortStagingBuffers CreateGlobalSortStagingBuffers(
 		[](FRHIComputeCommandList& RHICmdList) {});
 
 	return Buffers;
+}
+
+void UploadProxyRanges(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef ProxyRangesBuffer,
+	const TArray<FGlobalVisibleSplatRange>& GlobalRanges)
+{
+	if (!ProxyRangesBuffer || GlobalRanges.Num() == 0)
+	{
+		return;
+	}
+
+	TArray<FProxyRangeGPUEntry> UploadData;
+	UploadData.Reserve(GlobalRanges.Num());
+	for (const FGlobalVisibleSplatRange& Range : GlobalRanges)
+	{
+		FProxyRangeGPUEntry& Entry = UploadData.AddDefaulted_GetRef();
+		Entry.GlobalOffset = Range.GlobalOffset;
+		Entry.NumSplats = Range.NumSplats;
+	}
+
+	FUploadProxyRangesParameters* UploadParams =
+		GraphBuilder.AllocParameters<FUploadProxyRangesParameters>();
+	UploadParams->ProxyRangesUAV =
+		GraphBuilder.CreateUAV(ProxyRangesBuffer, PF_R32G32_UINT);
+
+	GraphBuilder.AddPass(
+		RDG_EVENT_NAME("Splat: UploadProxyRanges"),
+		UploadParams,
+		ERDGPassFlags::Compute,
+		[ProxyRangesBuffer, UploadData = MoveTemp(UploadData)](
+			FRHIComputeCommandList& RHICmdList)
+		{
+			const uint32 CopyBytes =
+				UploadData.Num() * sizeof(FProxyRangeGPUEntry);
+			if (CopyBytes == 0)
+			{
+				return;
+			}
+
+			// WDD-2026-04-06-UploadProxyRanges-UpgradeComment:GlobalSortStep3-v2
+			// Upload (globalOffset, numSplats) for each visible proxy to GPU so
+			// next global draw stage can map global ids back to proxy ranges.
+			void* Dst = RHICmdList.LockBuffer(
+				ProxyRangesBuffer->GetRHI(),
+				0,
+				CopyBytes,
+				RLM_WriteOnly);
+			FMemory::Memcpy(Dst, UploadData.GetData(), CopyBytes);
+			RHICmdList.UnlockBuffer(ProxyRangesBuffer->GetRHI());
+		});
 }
 } // namespace
 
@@ -236,6 +318,7 @@ FSplatSceneViewExtension::FSplatSceneViewExtension(
 void FSplatSceneViewExtension::PreRenderView_RenderThread(
 	FRDGBuilder& GraphBuilder, FSceneView& View)
 {
+	GlobalSortFrameState = {};
 	/**
 	 * Full & primary passes do actual splat calculations, which are shared with
 	 * secondary passes (if applicable).
@@ -255,21 +338,26 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 		BuildGlobalVisibleSplatRanges(SortedProxies, TotalVisibleSplats);
 	const bool bEnableGlobalSortStaging =
 		CVarSplatGlobalSortExperimental.GetValueOnRenderThread() != 0;
+	FGlobalSortStagingBuffers GlobalSortBuffers;
 	if (bEnableGlobalSortStaging && GlobalRanges.Num() > 1)
 	{
-		const FGlobalSortStagingBuffers GlobalSortBuffers =
-			CreateGlobalSortStagingBuffers(
-				GraphBuilder, TotalVisibleSplats, GlobalRanges.Num());
+		GlobalSortBuffers = CreateGlobalSortStagingBuffers(
+			GraphBuilder, TotalVisibleSplats, GlobalRanges.Num());
+		if (GlobalSortBuffers.IsValid())
+		{
+			UploadProxyRanges(
+				GraphBuilder,
+				GlobalSortBuffers.ProxyRanges,
+				GlobalRanges);
+		}
 
 		EASYTIME_LOGL(
 			"[GlobalSort Stage] VisibleProxies=%d TotalVisibleSplats=%u Buffers=%d",
 			GlobalRanges.Num(),
 			TotalVisibleSplats,
-			(GlobalSortBuffers.GlobalIndices && GlobalSortBuffers.GlobalDistances &&
-			 GlobalSortBuffers.ProxyRanges)
-				? 1
-				: 0);
+			GlobalSortBuffers.IsValid() ? 1 : 0);
 	}
+	uint32 RunningGlobalOffset = 0;
 	for (FSplatSceneProxy* Proxy : SortedProxies)
 	{
 		check(Proxy);
@@ -325,6 +413,26 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 				Proxy,
 				Proxy->GetIndicesFake(),
 				Proxy->GetDistancesFake());
+
+			// WDD-2026-04-06-GatherGlobalDepth32-UpgradeComment:GlobalSortStep4-v2
+			// Gather per-proxy render data and write global 32-bit depth keys
+			// directly, avoiding precision loss from local 16-bit distance bins.
+			if (GlobalSortBuffers.IsValid())
+			{
+				GatherProxyRenderDataToGlobal(
+					GraphBuilder,
+					View,
+					Proxy,
+					RunningGlobalOffset,
+					NumSplats,
+					GlobalSortBuffers.GlobalIndices,
+					GlobalSortBuffers.GlobalDistances,
+					GlobalSortBuffers.GlobalWorldCenters,
+					GlobalSortBuffers.GlobalTransforms,
+					GlobalSortBuffers.GlobalColors);
+
+				RunningGlobalOffset += NumSplats;
+			}
 		}
 		else
 		{
@@ -336,6 +444,26 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 			Proxy->TryEnqueueSort(GetOrigin(View), GetForward(View));
 		}
 	}
+
+	// WDD-2026-04-06-GlobalSortExecution-UpgradeComment:GlobalSortStep3-v1
+	// Execute a single global GPU sort over all visible splats.
+	if (GlobalSortBuffers.IsValid() && TotalVisibleSplats > 1)
+	{
+		SortGlobalSplats(
+			GraphBuilder,
+			GlobalSortBuffers.GlobalIndices,
+			GlobalSortBuffers.GlobalDistances,
+			TotalVisibleSplats);
+
+		// WDD-2026-04-06-GlobalFrameStatePublish-UpgradeComment:GlobalSortStep4-v1
+		// Publish global sorted buffers for the subsequent unified raster pass.
+		GlobalSortFrameState.SortedGlobalIndices = GlobalSortBuffers.GlobalIndices;
+		GlobalSortFrameState.GlobalWorldCenters = GlobalSortBuffers.GlobalWorldCenters;
+		GlobalSortFrameState.GlobalTransforms = GlobalSortBuffers.GlobalTransforms;
+		GlobalSortFrameState.GlobalColors = GlobalSortBuffers.GlobalColors;
+		GlobalSortFrameState.TotalVisibleSplats = TotalVisibleSplats;
+		GlobalSortFrameState.bValid = true;
+	}
 }
 
 void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
@@ -343,6 +471,43 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 	const FSceneView& View,
 	const FPostProcessingInputs& Inputs)
 {
+	if (GlobalSortFrameState.bValid && GlobalSortFrameState.TotalVisibleSplats > 1)
+	{
+		FRenderGlobalSplatDeps* GlobalPassParameters =
+			GraphBuilder.AllocParameters<FRenderGlobalSplatDeps>();
+		check(Inputs.SceneTextures);
+		GlobalPassParameters->PS.RenderTargets[0] = FRenderTargetBinding(
+			(*Inputs.SceneTextures)->SceneColorTexture,
+			ERenderTargetLoadAction::ELoad);
+		GlobalPassParameters->PS.RenderTargets.DepthStencil = FDepthStencilBinding(
+			(*Inputs.SceneTextures)->SceneDepthTexture,
+			ERenderTargetLoadAction::ELoad,
+			FExclusiveDepthStencil::DepthWrite_StencilNop);
+		GlobalPassParameters->VS.View = View.ViewUniformBuffer;
+		GlobalPassParameters->VS.InstancedView = View.GetInstancedViewUniformBuffer();
+		GlobalPassParameters->VS.SortedGlobalIndices =
+			GraphBuilder.CreateSRV(GlobalSortFrameState.SortedGlobalIndices, PF_R32_UINT);
+		GlobalPassParameters->VS.GlobalWorldCenters =
+			GraphBuilder.CreateSRV(GlobalSortFrameState.GlobalWorldCenters, PF_A32B32G32R32F);
+		GlobalPassParameters->VS.GlobalTransforms =
+			GraphBuilder.CreateSRV(GlobalSortFrameState.GlobalTransforms, PF_A32B32G32R32F);
+		GlobalPassParameters->VS.GlobalColors =
+			GraphBuilder.CreateSRV(GlobalSortFrameState.GlobalColors, PF_A32B32G32R32F);
+
+		GraphBuilder.AddPass(
+			RDG_EVENT_NAME("Splat: Render GlobalSorted"),
+			GlobalPassParameters,
+			ERDGPassFlags::Raster,
+			[GlobalPassParameters, this, &View](FRHICommandList& RHICmdList)
+			{
+				RenderGlobalSplats(
+					RHICmdList,
+					GlobalPassParameters,
+					GlobalSortFrameState.TotalVisibleSplats,
+					View);
+			});
+	}
+
 	const TArray<FSplatSceneProxy*> SortedProxies = GetSortedVisibleProxies(Proxies, View);
 	for (FSplatSceneProxy* Proxy : SortedProxies)
 	{
@@ -396,6 +561,10 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 
 		if (bProxySortGPU)
 		{
+				if (GlobalSortFrameState.bValid && GlobalSortFrameState.TotalVisibleSplats > 1)
+				{
+					continue;
+				}
 				FRenderSplatGPUSortDeps* PassParameters =
 					GraphBuilder.AllocParameters<FRenderSplatGPUSortDeps>();
 

@@ -103,5 +103,49 @@ FRDGPassRef SortSplats(
 	FRDGBufferRef Indices,
 	FRDGBufferRef Distances);
 
+/**
+ * Appends local (per-proxy) distance data into global sort buffers.
+ */
+FRDGPassRef AppendLocalSortToGlobal(
+	FRDGBuilder& GraphBuilder,
+	uint32 GlobalOffset,
+	uint32 NumSplats,
+	FRDGBufferRef LocalDistances,
+	FRDGBufferRef GlobalIndices,
+	FRDGBufferRef GlobalDistances);
+
+/**
+ * Sorts global per-splat buffers (value = global splat id).
+ */
+FRDGPassRef SortGlobalSplats(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef GlobalIndices,
+	FRDGBufferRef GlobalDistances,
+	uint32 TotalVisibleSplats);
+
+/**
+ * Gather one proxy's render inputs into global render buffers.
+ */
+FRDGPassRef GatherProxyRenderDataToGlobal(
+	FRDGBuilder& GraphBuilder,
+	const FSceneView& View,
+	FSplatSceneProxy* Proxy,
+	uint32 GlobalOffset,
+	uint32 NumSplats,
+	FRDGBufferRef GlobalIndices,
+	FRDGBufferRef GlobalDistances,
+	FRDGBufferRef GlobalWorldCenters,
+	FRDGBufferRef GlobalTransforms,
+	FRDGBufferRef GlobalColors);
+
+/**
+ * Draw globally sorted splats in one draw call.
+ */
+void RenderGlobalSplats(
+	FRHICommandList& RHICmdList,
+	FRenderGlobalSplatDeps* Parameters,
+	uint32 TotalVisibleSplats,
+	const FSceneView& View);
+
 } // namespace Easytime::Splat
 

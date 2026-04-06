@@ -46,6 +46,21 @@ IMPLEMENT_GLOBAL_SHADER(
 	"/Plugin/EasytimeSplat/Private/Interpolate4DCS.usf",
 	"main",
 	SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(
+	FCopyLocalSortToGlobalCS,
+	"/Plugin/EasytimeSplat/Private/CopyLocalSortToGlobalCS.usf",
+	"main",
+	SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(
+	FGatherProxyRenderDataToGlobalCS,
+	"/Plugin/EasytimeSplat/Private/GatherProxyRenderDataToGlobalCS.usf",
+	"main",
+	SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(
+	FRenderGlobalSplatVS,
+	"/Plugin/EasytimeSplat/Private/RenderGlobalSplatVS.usf",
+	"main",
+	SF_Vertex);
 
 } // namespace Easytime::Splat::Shaders
 

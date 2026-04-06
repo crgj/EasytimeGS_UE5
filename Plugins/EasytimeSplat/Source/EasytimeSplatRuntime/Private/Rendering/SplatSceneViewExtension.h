@@ -6,6 +6,7 @@
 
 #include "Containers/Set.h"
 #include "Misc/AssertionMacros.h"
+#include "RenderGraphResources.h"
 #include "SceneViewExtension.h"
 #include "SplatSceneProxy.h"
 
@@ -87,8 +88,19 @@ public:
 	}
 
 private:
+	struct FGlobalSortFrameState
+	{
+		FRDGBufferRef SortedGlobalIndices = nullptr;
+		FRDGBufferRef GlobalWorldCenters = nullptr;
+		FRDGBufferRef GlobalTransforms = nullptr;
+		FRDGBufferRef GlobalColors = nullptr;
+		uint32 TotalVisibleSplats = 0;
+		bool bValid = false;
+	};
+
 	bool bIsSortingOnGPU;
 	TSet<FSplatSceneProxy*> Proxies;
+	FGlobalSortFrameState GlobalSortFrameState;
 };
 
 } // namespace Easytime::Splat

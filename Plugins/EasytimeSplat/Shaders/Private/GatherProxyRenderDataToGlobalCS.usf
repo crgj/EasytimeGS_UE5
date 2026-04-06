@@ -1,0 +1,27 @@
+/*
+  Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
+*/
+
+#include "/Engine/Public/Platform.ush"
+
+#include "../ThirdParty/Public/constants.ush"
+#include "../ThirdParty/Public/unpacking.ush"
+
+float4x4 local_to_world;
+float4x4 local_to_clip;
+uint global_offset;
+uint num_splats;
+float opacity;
+float3 pos_scale_cm;
+float3 pos_min_cm;
+
+Buffer<uint> positions;
+Buffer<float4> transforms;
+Buffer<float4> colors;
+RWBuffer<uint> out_global_indices;
+RWBuffer<uint> out_global_distances;
+RWBuffer<float4> out_global_world_centers;
+RWBuffer<float4> out_global_transforms;
+RWBuffer<float4> out_global_colors;
+
+#include "../ThirdParty/Public/gather_proxy_render_data_to_global.cs.ush"

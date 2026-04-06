@@ -210,6 +210,84 @@ public:
 	}
 };
 
+/**
+ * Append a per-proxy local distance buffer into global sort buffers.
+ */
+class FCopyLocalSortToGlobalCS final : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FCopyLocalSortToGlobalCS);
+	SHADER_USE_PARAMETER_STRUCT(FCopyLocalSortToGlobalCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+	SHADER_PARAMETER(uint32, global_offset)
+	SHADER_PARAMETER(uint32, num_splats)
+	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, local_distances)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, out_global_indices)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, out_global_distances)
+	END_SHADER_PARAMETER_STRUCT()
+
+public:
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE_X"), THREAD_GROUP_SIZE_X);
+	}
+};
+
+/**
+ * Gather per-proxy render data into global per-splat buffers.
+ */
+class FGatherProxyRenderDataToGlobalCS final : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FGatherProxyRenderDataToGlobalCS);
+	SHADER_USE_PARAMETER_STRUCT(FGatherProxyRenderDataToGlobalCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+	SHADER_PARAMETER(FMatrix44f, local_to_world)
+	SHADER_PARAMETER(FMatrix44f, local_to_clip)
+	SHADER_PARAMETER(uint32, global_offset)
+	SHADER_PARAMETER(uint32, num_splats)
+	SHADER_PARAMETER(float, opacity)
+	SHADER_PARAMETER_STRUCT_INCLUDE(FPackedPositionParameters, Positions)
+	SHADER_PARAMETER_SRV(Buffer<float4>, transforms)
+	SHADER_PARAMETER_SRV(Buffer<float4>, colors)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, out_global_indices)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, out_global_distances)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float4>, out_global_world_centers)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float4>, out_global_transforms)
+	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float4>, out_global_colors)
+	END_SHADER_PARAMETER_STRUCT()
+
+public:
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE_X"), THREAD_GROUP_SIZE_X);
+	}
+};
+
+/**
+ * Render globally sorted splats from global buffers.
+ */
+class FRenderGlobalSplatVS final : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FRenderGlobalSplatVS);
+	SHADER_USE_PARAMETER_STRUCT(FRenderGlobalSplatVS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+	SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+	SHADER_PARAMETER_STRUCT_REF(FInstancedViewUniformShaderParameters, InstancedView)
+	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, SortedGlobalIndices)
+	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, GlobalWorldCenters)
+	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, GlobalTransforms)
+	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, GlobalColors)
+	END_SHADER_PARAMETER_STRUCT()
+};
+
 } // namespace Shaders
 
 BEGIN_SHADER_PARAMETER_STRUCT(FRenderSplatCPUSortDeps, )
@@ -223,6 +301,11 @@ BEGIN_SHADER_PARAMETER_STRUCT(FRenderSplatGPUSortDeps, )
 SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, Indices)
 SHADER_PARAMETER_STRUCT_INCLUDE(
 	Shaders::FRenderSplatVS<Shaders::ESortingDevice::GPU>::FParameters, VS)
+SHADER_PARAMETER_STRUCT_INCLUDE(Shaders::FRenderSplatPS::FParameters, PS)
+END_SHADER_PARAMETER_STRUCT()
+
+BEGIN_SHADER_PARAMETER_STRUCT(FRenderGlobalSplatDeps, )
+SHADER_PARAMETER_STRUCT_INCLUDE(Shaders::FRenderGlobalSplatVS::FParameters, VS)
 SHADER_PARAMETER_STRUCT_INCLUDE(Shaders::FRenderSplatPS::FParameters, PS)
 END_SHADER_PARAMETER_STRUCT()
 

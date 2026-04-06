@@ -1,0 +1,80 @@
+/*
+  Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
+*/
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Public/Platform.ush"
+
+#include "../ThirdParty/Public/constants.ush"
+
+#define WITH_VIEW_ID USE_MULTI_VIEW_ID_SV
+
+Buffer<uint> SortedGlobalIndices;
+Buffer<float4> GlobalWorldCenters;
+Buffer<float4> GlobalTransforms;
+Buffer<float4> GlobalColors;
+
+half4 world_to_clip(
+	half3 world
+#if WITH_VIEW_ID
+	,
+	uint in_view_id
+#endif
+)
+{
+#if USE_MULTI_VIEW_ID_SV
+	ResolvedView = ResolveView(in_view_id);
+#else
+	ResolvedView = ResolveView();
+#endif
+	world += ResolvedView.PreViewTranslationHigh;
+	return mul(half4(world, 1), ResolvedView.TranslatedWorldToClip);
+}
+
+half2 get_render_resolution()
+{
+	return View.ViewSizeAndInvSize.xy / View.ViewResolutionFraction;
+}
+
+void main(in uint in_id : SV_VertexID,
+#if WITH_VIEW_ID
+          in uint in_view_id : SV_ViewID,
+#endif
+          out half2 out_sig_div_sqrt_2 : DELTA_STD_DEVS,
+          out nointerpolation float4 out_color : COLOR,
+          out half4 out_position : SV_Position) {
+  uint sorted_id = in_id / 6;
+  uint splat_id = SortedGlobalIndices[sorted_id];
+
+  float3 pos_world = GlobalWorldCenters[splat_id].xyz;
+  float4 pos_clip = world_to_clip(
+    pos_world
+#if WITH_VIEW_ID
+    , in_view_id
+#endif
+  );
+  bool outside_frustum = pos_clip.x < -pos_clip.w || pos_clip.x > pos_clip.w ||
+                         pos_clip.y < -pos_clip.w || pos_clip.y > pos_clip.w ||
+                         pos_clip.z > pos_clip.w;
+
+  if (outside_frustum) {
+    out_position = half4(0.f, 0.f, 0.f, 0.f);
+    return;
+  }
+
+  half4 t = GlobalTransforms[splat_id];
+  half2 corners[6] = {
+      half2(-RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      half2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      half2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
+      half2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      half2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
+      half2(RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2)};
+  half2 offset = mul(half2x2(t.x, t.y, t.z, t.w), corners[in_id % 6]);
+  offset /= get_render_resolution();
+
+  out_position =
+      half4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
+  out_sig_div_sqrt_2 = corners[in_id % 6];
+  out_color = GlobalColors[splat_id];
+}
