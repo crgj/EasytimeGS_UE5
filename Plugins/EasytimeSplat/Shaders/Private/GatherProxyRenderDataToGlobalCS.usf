@@ -8,16 +8,22 @@
 #include "../ThirdParty/Public/unpacking.ush"
 
 float4x4 local_to_world;
+float4x4 local_to_view;
 float4x4 local_to_clip;
 uint global_offset;
 uint num_splats;
+uint sh_degree;
+uint sh_num_triplets;
+float two_focal_length;
 float opacity;
+float3 world_camera_origin;
 float3 pos_scale_cm;
 float3 pos_min_cm;
 
 Buffer<uint> positions;
-Buffer<float4> transforms;
+Buffer<uint2> covariances;
 Buffer<float4> colors;
+Buffer<float3> sh_coefficients;
 RWBuffer<uint> out_global_indices;
 RWBuffer<uint> out_global_distances;
 RWBuffer<float4> out_global_world_centers;

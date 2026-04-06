@@ -182,10 +182,12 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 			to_scale_linear(Get(Property::ScaleX)),
 			to_scale_linear(Get(Property::ScaleY)));
 
+		// WDD-2026-04-06-LinearDCImportFix-UpgradeComment:ColorMatch-v1
+		// Keep imported base color in linear space; render path/sh blending runs linear.
 		C[Index] = FVector4f(
-			to_color_srgb_float(Get(Property::DCRed)),
-			to_color_srgb_float(Get(Property::DCGreen)),
-			to_color_srgb_float(Get(Property::DCBlue)),
+			to_color_linear_float(Get(Property::DCRed)),
+			to_color_linear_float(Get(Property::DCGreen)),
+			to_color_linear_float(Get(Property::DCBlue)),
 			to_alpha_linear_float(Get(Property::Opacity)));
 	};
 
@@ -294,10 +296,12 @@ UObject* USplat4DAssetFactory::FactoryCreateBinary(
 		{
 			const FVector3f& DC0 = DCBankData[i * PLYMetadata.num_dc_banks];
 			const float BaseAlpha = Colors[i].W;
+			// WDD-2026-04-06-LinearDCImportFix-UpgradeComment:ColorMatch-v1
+			// 4D bank frame-0 fallback should also stay linear to match runtime.
 			Colors[i] = FVector4f(
-				to_color_srgb_float(DC0.X),
-				to_color_srgb_float(DC0.Y),
-				to_color_srgb_float(DC0.Z),
+				to_color_linear_float(DC0.X),
+				to_color_linear_float(DC0.Y),
+				to_color_linear_float(DC0.Z),
 				BaseAlpha);
 		}
 	}

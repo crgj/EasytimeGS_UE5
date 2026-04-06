@@ -594,16 +594,23 @@ FRDGPassRef GatherProxyRenderDataToGlobal(
 		GraphBuilder.AllocParameters<
 			Shaders::FGatherProxyRenderDataToGlobalCS::FParameters>();
 	Params->local_to_world = FMatrix44f(Proxy->GetLocalToWorld());
+	Params->local_to_view =
+		FMatrix44f(Proxy->GetLocalToWorld() * GetView(View));
 	Params->local_to_clip = FMatrix44f(Proxy->GetLocalToWorld() * GetViewProj(View));
 	Params->global_offset = GlobalOffset;
 	Params->num_splats = NumSplats;
+	Params->sh_degree = Proxy->GetSelectedSHDegree();
+	Params->sh_num_triplets = Proxy->GetNumSHTriplets();
+	Params->two_focal_length = 2.f * GetFocalLength(View);
 	Params->opacity = Proxy->GetOpacity();
+	Params->world_camera_origin = GetOrigin(View);
 	FVector3f PosMinCM, PosScaleCM;
 	Params->Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	Params->Positions.pos_min_cm = PosMinCM;
 	Params->Positions.pos_scale_cm = PosScaleCM;
-	Params->transforms = Proxy->GetTransformsSRV();
+	Params->covariances = Proxy->GetCovariancesSRV();
 	Params->colors = Proxy->GetColorsSRV();
+	Params->sh_coefficients = Proxy->GetSHCoefficientsSRV();
 	Params->out_global_indices =
 		GraphBuilder.CreateUAV(GlobalIndices, PF_R32_UINT);
 	Params->out_global_distances =

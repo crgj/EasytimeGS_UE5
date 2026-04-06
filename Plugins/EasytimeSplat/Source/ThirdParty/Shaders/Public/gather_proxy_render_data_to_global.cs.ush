@@ -2,6 +2,87 @@
   Copyright (c) 2025 Easytime Technology Co., Ltd. See LICENSE.md.
 */
 
+static const float SH_C1 = 0.4886025119029199f;
+static const float SH_C2_0 = 1.0925484305920792f;
+static const float SH_C2_1 = -1.0925484305920792f;
+static const float SH_C2_2 = 0.31539156525252005f;
+static const float SH_C2_3 = -1.0925484305920792f;
+static const float SH_C2_4 = 0.5462742152960396f;
+static const float SH_C3_0 = -0.5900435899266435f;
+static const float SH_C3_1 = 2.890611442640554f;
+static const float SH_C3_2 = -0.4570457994644658f;
+static const float SH_C3_3 = 0.3731763325901154f;
+static const float SH_C3_4 = -0.4570457994644658f;
+static const float SH_C3_5 = 1.445305721320277f;
+static const float SH_C3_6 = -0.5900435899266435f;
+
+float3 eval_sh(uint splat_id, float3 view_dir_src)
+{
+  if (sh_degree == 0u || sh_num_triplets == 0u)
+  {
+    return 0.0f;
+  }
+
+  uint base_idx = splat_id * sh_num_triplets;
+  float x = view_dir_src.x;
+  float y = view_dir_src.y;
+  float z = view_dir_src.z;
+  float3 result = 0.0f;
+
+  if (sh_num_triplets >= 3u)
+  {
+    float3 sh1 = sh_coefficients[base_idx + 0u];
+    float3 sh2 = sh_coefficients[base_idx + 1u];
+    float3 sh3 = sh_coefficients[base_idx + 2u];
+    result += SH_C1 * (-sh1 * y + sh2 * z - sh3 * x);
+  }
+
+  if (sh_degree >= 2u && sh_num_triplets >= 8u)
+  {
+    float xx = x * x;
+    float yy = y * y;
+    float zz = z * z;
+    float xy = x * y;
+    float yz = y * z;
+    float xz = x * z;
+
+    float3 sh4 = sh_coefficients[base_idx + 3u];
+    float3 sh5 = sh_coefficients[base_idx + 4u];
+    float3 sh6 = sh_coefficients[base_idx + 5u];
+    float3 sh7 = sh_coefficients[base_idx + 6u];
+    float3 sh8 = sh_coefficients[base_idx + 7u];
+
+    result +=
+      sh4 * (SH_C2_0 * xy) +
+      sh5 * (SH_C2_1 * yz) +
+      sh6 * (SH_C2_2 * (2.0f * zz - xx - yy)) +
+      sh7 * (SH_C2_3 * xz) +
+      sh8 * (SH_C2_4 * (xx - yy));
+
+    if (sh_degree >= 3u && sh_num_triplets >= 15u)
+    {
+      float3 sh9 = sh_coefficients[base_idx + 8u];
+      float3 sh10 = sh_coefficients[base_idx + 9u];
+      float3 sh11 = sh_coefficients[base_idx + 10u];
+      float3 sh12 = sh_coefficients[base_idx + 11u];
+      float3 sh13 = sh_coefficients[base_idx + 12u];
+      float3 sh14 = sh_coefficients[base_idx + 13u];
+      float3 sh15 = sh_coefficients[base_idx + 14u];
+
+      result +=
+        sh9  * (SH_C3_0 * y * (3.0f * xx - yy)) +
+        sh10 * (SH_C3_1 * xy * z) +
+        sh11 * (SH_C3_2 * y * (4.0f * zz - xx - yy)) +
+        sh12 * (SH_C3_3 * z * (2.0f * zz - 3.0f * xx - 3.0f * yy)) +
+        sh13 * (SH_C3_4 * x * (4.0f * zz - xx - yy)) +
+        sh14 * (SH_C3_5 * z * (xx - yy)) +
+        sh15 * (SH_C3_6 * x * (xx - 3.0f * yy));
+    }
+  }
+
+  return result;
+}
+
 [numthreads(THREAD_GROUP_SIZE_X, 1, 1)] void main(
     uint3 dispatch_thread_id : SV_DispatchThreadID) {
   uint local_id = dispatch_thread_id.x;
@@ -12,7 +93,31 @@
   uint global_id = global_offset + local_id;
   float4 pos_local = unpack_pos(positions[local_id], pos_scale_cm, pos_min_cm);
   float4 pos_world = mul(pos_local, local_to_world);
+  float3 pos_view = mul(pos_local, local_to_view);
   float4 pos_clip = mul(pos_local, local_to_clip);
+
+  // WDD-2026-04-06-GlobalTransformInGather-UpgradeComment:GlobalSortStep4-v7
+  // Recompute 2x2 transform directly from covariances to avoid external per-proxy
+  // transform buffer hazards in multi-proxy global sort mode.
+  float3x3 sig = unpack_cov_mat(covariances[local_id]);
+  float3x3 W = float3x3(local_to_view[0].xyz, local_to_view[1].xyz, local_to_view[2].xyz);
+  float scale_x = -pos_view.x / pos_view.z;
+  float scale_y = -pos_view.y / pos_view.z;
+  float3 jw_0 = float3(W[0][0] + scale_x * W[0][2], W[1][0] + scale_x * W[1][2], W[2][0] + scale_x * W[2][2]);
+  float3 jw_1 = float3(W[0][1] + scale_y * W[0][2], W[1][1] + scale_y * W[1][2], W[2][1] + scale_y * W[2][2]);
+  float3 jw_sig_0 = mul(jw_0, sig);
+  float3 jw_sig_1 = mul(jw_1, sig);
+  float sig_p_00 = mul(jw_sig_0, jw_0);
+  float sig_p_01_10 = mul(jw_sig_0, jw_1);
+  float sig_p_11 = mul(jw_sig_1, jw_1);
+  float det = sig_p_00 * sig_p_11 - sig_p_01_10 * sig_p_01_10;
+  float trace = sig_p_00 + sig_p_11;
+  float sqrt_disc = sqrt(max(trace * trace - 4.0f * det, 0.0f));
+  float2 two_lmb = float2(trace + sqrt_disc, trace - sqrt_disc);
+  float2 sqrt_two_sigma = sqrt(max(two_lmb, float2(0.0f, 0.0f)));
+  float2 v_0 = normalize(float2(sig_p_01_10, two_lmb.x / 2.0f - sig_p_00));
+  float2 projected_scale = two_focal_length / pos_view.z * sqrt_two_sigma;
+  float4 transform = float4(v_0.x, -v_0.y, v_0.y, v_0.x) * projected_scale.xyxy;
 
   // WDD-2026-04-06-GlobalDepth32-UpgradeComment:GlobalSortStep4-v2
   // Build global sortable key directly from clip depth with 32-bit precision.
@@ -21,9 +126,27 @@
   out_global_distances[global_id] = depth_key;
 
   out_global_world_centers[global_id] = pos_world;
-  out_global_transforms[global_id] = transforms[local_id];
+  out_global_transforms[global_id] = transform;
 
   float4 c = colors[local_id];
+  // WDD-2026-04-06-GlobalSHEval-UpgradeComment:GlobalSortStep4-v6
+  // Match per-proxy path: evaluate SH in source basis and add to base color.
+  if (sh_degree > 0u && sh_num_triplets > 0u)
+  {
+    float3x3 local_to_world_3x3 = (float3x3)local_to_world;
+    local_to_world_3x3[0] = normalize(local_to_world_3x3[0]);
+    local_to_world_3x3[1] = normalize(local_to_world_3x3[1]);
+    local_to_world_3x3[2] = normalize(local_to_world_3x3[2]);
+    float3x3 world_to_local_3x3 = transpose(local_to_world_3x3);
+    float3 view_delta_world = pos_world.xyz - world_camera_origin;
+    float3 view_dir_ue_local = mul(view_delta_world, world_to_local_3x3);
+    float3 view_dir_src = float3(
+      view_dir_ue_local.y,
+      -view_dir_ue_local.z,
+      view_dir_ue_local.x);
+    view_dir_src *= rsqrt(max(dot(view_dir_src, view_dir_src), 1e-8f));
+    c.rgb = max(c.rgb + eval_sh(local_id, view_dir_src), 0.0f);
+  }
   c.a *= opacity;
   out_global_colors[global_id] = c;
 }

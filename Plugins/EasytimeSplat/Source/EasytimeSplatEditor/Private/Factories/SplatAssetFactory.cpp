@@ -158,10 +158,12 @@ UObject* USplatAssetFactory::FactoryCreateBinary(
 			to_scale_linear(Get(Property::ScaleX)),
 			to_scale_linear(Get(Property::ScaleY)));
 
+		// WDD-2026-04-06-LinearDCImportFix-UpgradeComment:ColorMatch-v1
+		// Keep imported base color in linear space; render path/sh blending runs linear.
 		C[Index] = FVector4f(
-			to_color_srgb_float(Get(Property::DCRed)),
-			to_color_srgb_float(Get(Property::DCGreen)),
-			to_color_srgb_float(Get(Property::DCBlue)),
+			to_color_linear_float(Get(Property::DCRed)),
+			to_color_linear_float(Get(Property::DCGreen)),
+			to_color_linear_float(Get(Property::DCBlue)),
 			to_alpha_linear_float(Get(Property::Opacity)));
 	};
 

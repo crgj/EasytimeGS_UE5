@@ -135,10 +135,16 @@ inline float to_color_srgb_float(PropertyType dc) {
   return to_color_srgb_float(to<float>(dc));
 }
 
-inline float to_color_linear_float(PropertyType dc) {
-  float dc_f = to<float>(dc);
+// WDD-2026-04-06-LinearDCImportFix-UpgradeComment:ColorMatch-v1
+// Runtime shading/blending is linear; import DC to linear float to avoid
+// washed-out results from treating sRGB values as linear.
+inline float to_color_linear_float(float dc_f) {
   float color_srgb = .5f + .2820948f * dc_f;
   return std::clamp(std::pow(std::max(color_srgb, 0.0f), 2.2f), 0.0f, 1.0f);
+}
+
+inline float to_color_linear_float(PropertyType dc) {
+  return to_color_linear_float(to<float>(dc));
 }
 
 /**

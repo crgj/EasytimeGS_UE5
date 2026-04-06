@@ -172,7 +172,7 @@ TArray<FGlobalVisibleSplatRange> BuildGlobalVisibleSplatRanges(
 
 	for (FSplatSceneProxy* Proxy : SortedVisibleProxies)
 	{
-		if (!Proxy || !Proxy->IsSortingOnGPU())
+		if (!Proxy)
 		{
 			continue;
 		}
@@ -357,6 +357,8 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 			TotalVisibleSplats,
 			GlobalSortBuffers.IsValid() ? 1 : 0);
 	}
+	const bool bUseUnifiedGlobalSort =
+		GlobalSortBuffers.IsValid() && TotalVisibleSplats > 1;
 	uint32 RunningGlobalOffset = 0;
 	for (FSplatSceneProxy* Proxy : SortedProxies)
 	{
@@ -384,8 +386,27 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 			Interpolate4D(GraphBuilder, Proxy, Proxy->GetCurrentFrame());
 		}
 
-		FRDGPassRef ProjPass = ComputeTransforms(GraphBuilder, View, Proxy);
 		const bool bProxySortGPU = Proxy->IsSortingOnGPU();
+		if (bUseUnifiedGlobalSort)
+		{
+			// WDD-2026-04-06-UnifiedGlobalGather-UpgradeComment:GlobalSortStep4-v5
+			// In unified global sort mode, all proxies (CPU/GPU sort legacy modes)
+			// must feed the same global buffers.
+			GatherProxyRenderDataToGlobal(
+				GraphBuilder,
+				View,
+				Proxy,
+				RunningGlobalOffset,
+				NumSplats,
+				GlobalSortBuffers.GlobalIndices,
+				GlobalSortBuffers.GlobalDistances,
+				GlobalSortBuffers.GlobalWorldCenters,
+				GlobalSortBuffers.GlobalTransforms,
+				GlobalSortBuffers.GlobalColors);
+			RunningGlobalOffset += NumSplats;
+			continue;
+		}
+		FRDGPassRef ProjPass = ComputeTransforms(GraphBuilder, View, Proxy);
 
 		if (bProxySortGPU)
 		{
@@ -447,7 +468,7 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 
 	// WDD-2026-04-06-GlobalSortExecution-UpgradeComment:GlobalSortStep3-v1
 	// Execute a single global GPU sort over all visible splats.
-	if (GlobalSortBuffers.IsValid() && TotalVisibleSplats > 1)
+	if (bUseUnifiedGlobalSort)
 	{
 		SortGlobalSplats(
 			GraphBuilder,
@@ -506,6 +527,10 @@ void FSplatSceneViewExtension::PrePostProcessPass_RenderThread(
 					GlobalSortFrameState.TotalVisibleSplats,
 					View);
 			});
+
+		// WDD-2026-04-06-UnifiedGlobalDrawOnly-UpgradeComment:GlobalSortStep4-v5
+		// Global sorted pass already rendered all visible proxies.
+		return;
 	}
 
 	const TArray<FSplatSceneProxy*> SortedProxies = GetSortedVisibleProxies(Proxies, View);
