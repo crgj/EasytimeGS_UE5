@@ -31,6 +31,7 @@ public:
 	virtual bool IsReadyForFinishDestroy() override;
 	virtual void PostLoad() override; // Loading from disk only.
 	virtual void Serialize(FArchive& Ar) override;
+	virtual bool ShouldSerializeExpandedPayload() const { return true; }
 	//~ End UObject Interface
 
 	/**
@@ -154,7 +155,6 @@ public:
 		Colors = Easytime::Splat::TSplatStaticBuffer(std::move(Data));
 	}
 
-#if WITH_EDITOR
 	/**
 	 * Populates this asset with covariance matrices describing the given
 	 * rotations and scales.
@@ -192,9 +192,8 @@ public:
 		TArray<FVector3f>&& PositionsMeters,
 		const FVector3f& PosMinMeters,
 		const FVector3f& PosMaxMeters);
-#endif
 
-private:
+protected:
 	/**
 	 * Enqueues RHI initialization for all resources.
 	 */
@@ -234,7 +233,6 @@ private:
 	TArray<FVector3f> ConvexHullVertices;
 	TArray<uint32> ConvexHullIndices;
 
-protected:
 	FRenderCommandFence ReleaseResourcesFence;
 
 #if WITH_EDITOR
@@ -257,6 +255,10 @@ public:
 	virtual bool IsReadyForFinishDestroy() override;
 	virtual void PostLoad() override;
 	virtual void Serialize(FArchive& Ar) override;
+	virtual bool ShouldSerializeExpandedPayload() const override
+	{
+		return !bStoreAsCompressedSOG4;
+	}
 	//~ End USplatAsset Interface
 
 	int32 GetTotalFrames() const { return TotalFrames; }
@@ -275,6 +277,7 @@ public:
 	uint32 GetNumXYZBanks() const { return NumXYZBanks; }
 	uint32 GetNumRotBanks() const { return NumRotBanks; }
 	uint32 GetNumDCBanks() const { return NumDCBanks; }
+	bool EnsureExpandedRuntimeData();
 
 	UPROPERTY(VisibleAnywhere, Category = "Splat")
 	int32 TotalFrames = 0;
@@ -300,11 +303,42 @@ public:
 	std::optional<Easytime::Splat::TSplatStaticBuffer<FVector2f>> LifetimeMuW;
 	std::optional<Easytime::Splat::TSplatStaticBuffer<FVector3f>> Scales;
 
+	void SetCompressedSOG4Source(TArray<uint8>&& InBytes, int32 InNumSplats = 0)
+	{
+		CompressedSOG4 = std::move(InBytes);
+		bStoreAsCompressedSOG4 = CompressedSOG4.Num() > 0;
+		CompressedSOG4NumSplats = InNumSplats > 0 ? InNumSplats : 0;
+	}
+
+	bool IsStoredAsCompressedSOG4() const { return bStoreAsCompressedSOG4; }
+
 private:
 	void BeginInit();
+	bool DecodeCompressedSOG4ToExpanded();
+
+	UPROPERTY()
+	bool bStoreAsCompressedSOG4 = false;
+
+	UPROPERTY()
+	TArray<uint8> CompressedSOG4;
+
+	UPROPERTY()
+	int32 CompressedSOG4NumSplats = 0;
 
 #if WITH_EDITOR
 	friend class USplat4DAssetFactory;
 #endif
+};
+
+UCLASS()
+class EASYTIMESPLATRUNTIME_API UPly4SplatAsset : public USplat4DAsset
+{
+	GENERATED_BODY()
+};
+
+UCLASS()
+class EASYTIMESPLATRUNTIME_API USog4SplatAsset : public USplat4DAsset
+{
+	GENERATED_BODY()
 };
 

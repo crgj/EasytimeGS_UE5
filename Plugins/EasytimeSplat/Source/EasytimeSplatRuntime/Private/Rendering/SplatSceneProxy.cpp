@@ -72,15 +72,24 @@ FSplatSceneProxy::FSplatSceneProxy(USplatComponent& Component)
 	{
 		OutVerts.Push(ConvexHullVertices[Index]);
 	}
-	// Enqueues RHI init for each buffer.
-	VertexBuffers.InitFromDynamicVertex(&VertexFactory, OutVerts);
-
-	IndexBuffer.Indices.SetNumUninitialized(ConvexHullIndices.Num());
-	for (int32 Index = 0; Index < ConvexHullIndices.Num(); ++Index)
+	if (OutVerts.Num() > 0)
 	{
-		IndexBuffer.Indices[Index] = ConvexHullIndices[Index];
+		// Enqueues RHI init for each buffer.
+		VertexBuffers.InitFromDynamicVertex(&VertexFactory, OutVerts);
 	}
-	BeginInitResource(&IndexBuffer);
+	if (ConvexHullIndices.Num() > 0)
+	{
+		IndexBuffer.Indices.SetNumUninitialized(ConvexHullIndices.Num());
+		for (int32 Index = 0; Index < ConvexHullIndices.Num(); ++Index)
+		{
+			IndexBuffer.Indices[Index] = ConvexHullIndices[Index];
+		}
+		BeginInitResource(&IndexBuffer);
+	}
+	else
+	{
+		NumConvexHullTris = 0;
+	}
 
 	Name = Component.GetOwner()->GetActorLabel();
 #else
@@ -263,6 +272,10 @@ void FSplatSceneProxy::GetDynamicMeshElements(
 {
 	check(GEngine);
 	check(BodySetup);
+	if (NumConvexHullTris == 0)
+	{
+		return;
+	}
 
 	if (GIsEditor)
 	{

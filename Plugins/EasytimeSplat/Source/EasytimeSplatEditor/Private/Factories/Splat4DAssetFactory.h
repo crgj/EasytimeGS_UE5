@@ -10,7 +10,7 @@
 #include "Splat4DAssetFactory.generated.h"
 
 /**
- * Importer for 4DGS `.ply4` files.
+ * Importer for 4DGS `.ply4` and `.sog4` files.
  */
 UCLASS()
 class USplat4DAssetFactory final : public UFactory
@@ -19,12 +19,12 @@ class USplat4DAssetFactory final : public UFactory
 
 public:
 	/**
-	 * Registers `.ply4` file type for import as a 4D Gaussian Splat asset.
+	 * Registers `.ply4` / `.sog4` file types for import as 4D Gaussian Splat assets.
 	 */
 	USplat4DAssetFactory();
 
 	/**
-	 * Imports splat `.ply4` files into `USplat4DAsset`s.
+	 * Imports splat `.ply4` / `.sog4` files into `USplat4DAsset`s.
 	 */
 	virtual UObject* FactoryCreateBinary(
 		UClass* InClass,
@@ -36,4 +36,12 @@ public:
 		const uint8*& Buffer,
 		const uint8* BufferEnd,
 		FFeedbackContext* Warn) override;
+
+private:
+	UObject* ImportSOG4(
+		UObject* InParent,
+		FName InName,
+		EObjectFlags Flags,
+		const uint8* Buffer,
+		const uint8* BufferEnd);
 };

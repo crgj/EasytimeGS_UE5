@@ -76,6 +76,10 @@ public:
 		BodySetup = nullptr;
 		if (Asset)
 		{
+			if (USplat4DAsset* Asset4D = Cast<USplat4DAsset>(Asset))
+			{
+				Asset4D->EnsureExpandedRuntimeData();
+			}
 			GetBodySetup();
 		}
 		UpdateBounds();

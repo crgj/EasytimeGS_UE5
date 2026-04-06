@@ -17,9 +17,12 @@ public class EasytimeSplatEditor : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"FileUtilities",
 				"GeometryCore",
 				"EasytimeSplatRuntime",
 				"EasytimeSplatThirdParty",
+				"ImageWrapper",
+				"Json",
 				"UnrealEd",
 				"RenderCore",
 				"RHI"

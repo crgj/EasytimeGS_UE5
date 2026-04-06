@@ -23,6 +23,14 @@ FPrimitiveSceneProxy* USplatComponent::CreateSceneProxy()
 		EASYTIME_LOGW("[CreateSceneProxy] %s has no Asset", *GetNameSafe(this));
 		return nullptr;
 	}
+	if (USplat4DAsset* Asset4D = Cast<USplat4DAsset>(Asset))
+	{
+		if (!Asset4D->EnsureExpandedRuntimeData())
+		{
+			EASYTIME_LOGW("[CreateSceneProxy] Failed to prepare 4D runtime data for %s", *GetNameSafe(Asset4D));
+			return nullptr;
+		}
+	}
 
 	EASYTIME_LOGL(
 		"[CreateSceneProxy] Component=%s Asset=%s Class=%s",
@@ -38,24 +46,42 @@ UBodySetup* USplatComponent::GetBodySetup()
 	{
 		return nullptr;
 	}
-	else if (!BodySetup)
-	{
-		BodySetup = NewObject<UBodySetup>();
 
-		TConstArrayView<FVector3f> ConvexHullVertices =
-			Asset->GetConvexHullVertices();
+	if (USplat4DAsset* Asset4D = Cast<USplat4DAsset>(Asset))
+	{
+		Asset4D->EnsureExpandedRuntimeData();
+	}
+
+	const TConstArrayView<FVector3f> ConvexHullVertices = Asset->GetConvexHullVertices();
+	const bool bNeedRebuildBodySetup =
+		!BodySetup ||
+		BodySetup->AggGeom.ConvexElems.Num() == 0;
+	if (bNeedRebuildBodySetup)
+	{
+		BodySetup = NewObject<UBodySetup>(this);
+		BodySetup->AggGeom = FKAggregateGeom();
 
 		FKConvexElem Convex;
-		Convex.VertexData.AddUninitialized(ConvexHullVertices.Num());
-		for (int32 Index = 0; Index < ConvexHullVertices.Num(); ++Index)
+		if (ConvexHullVertices.Num() >= 3)
 		{
-			Convex.VertexData[Index] = FVector(ConvexHullVertices[Index]);
-		}
-		Convex.UpdateElemBox();
+			Convex.VertexData.AddUninitialized(ConvexHullVertices.Num());
+			for (int32 Index = 0; Index < ConvexHullVertices.Num(); ++Index)
+			{
+				Convex.VertexData[Index] = FVector(ConvexHullVertices[Index]);
+			}
+			Convex.UpdateElemBox();
 
-		FKAggregateGeom AggGeom;
-		AggGeom.ConvexElems.Add(Convex);
-		BodySetup->AddCollisionFrom(AggGeom);
+			FKAggregateGeom AggGeom;
+			AggGeom.ConvexElems.Add(Convex);
+			BodySetup->AddCollisionFrom(AggGeom);
+		}
+		else
+		{
+			EASYTIME_LOGW(
+				"[GetBodySetup] Convex hull unavailable for %s (vertices=%d).",
+				*GetNameSafe(Asset),
+				ConvexHullVertices.Num());
+		}
 	}
 
 	return BodySetup;

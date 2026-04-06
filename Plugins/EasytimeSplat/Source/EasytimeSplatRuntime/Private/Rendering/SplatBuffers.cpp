@@ -10,9 +10,15 @@ namespace Easytime::Splat
 {
 void FSplatBufferBase::InitRHI(FRHICommandListBase& RHICmdList)
 {
+	// WDD-2026-04-06-ZeroSizeBufferGuard-UpgradeComment:RuntimeStability-v1
+	// Some import/runtime edge cases can produce empty resource arrays while the
+	// render path still expects a bindable SRV/UAV. Allocate one element to keep
+	// RHI resource creation valid and avoid fatal zero-sized buffer asserts.
+	const uint32 SafeSize = (Size > 0u) ? Size : Stride;
+
 	FRHIResourceCreateInfo CreateInfo(*GetFriendlyName(), ResourceArray);
 	VertexBufferRHI =
-		RHICmdList.CreateBuffer(Size, Usage, Stride, State, CreateInfo);
+		RHICmdList.CreateBuffer(SafeSize, Usage, Stride, State, CreateInfo);
 	check(VertexBufferRHI);
 
 	FRHIViewDesc::FBufferSRV::FInitializer SRVCreateDesc =
