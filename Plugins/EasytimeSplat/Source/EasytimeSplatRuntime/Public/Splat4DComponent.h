@@ -25,6 +25,8 @@ public:
 	/** Overall opacity multiplier applied to all splats during rendering. */
 	float Opacity = 1.0f;
 
+	bool ShouldFreezeEditorInteraction() const;
+	void UpdateEditorInteractionFreeze();
 	void ApplyCurrentFrame();
 	void ForceRefreshSplatRenderData();
 
@@ -39,4 +41,7 @@ public:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
+
+private:
+	bool bLastEditorInteractionFrozen = false;
 };

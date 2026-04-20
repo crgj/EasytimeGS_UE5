@@ -104,6 +104,16 @@ float3 apply_color_controls(float3 color)
   float3 pos_view = mul(pos_local, local_to_view);
   float4 pos_clip = mul(pos_local, local_to_clip);
 
+  if (pos_view.z >= -1e-4f && pos_view.z <= 1e-4f)
+  {
+    out_global_indices[global_id] = global_id;
+    out_global_distances[global_id] = 0u;
+    out_global_world_centers[global_id] = pos_world;
+    out_global_transforms[global_id] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    out_global_colors[global_id] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    return;
+  }
+
   // WDD-2026-04-06-GlobalTransformInGather-UpgradeComment:GlobalSortStep4-v7
   // Recompute 2x2 transform directly from covariances to avoid external per-proxy
   // transform buffer hazards in multi-proxy global sort mode.
@@ -126,6 +136,11 @@ float3 apply_color_controls(float3 color)
   float2 v_0 = normalize(float2(sig_p_01_10, two_lmb.x / 2.0f - sig_p_00));
   float2 projected_scale = two_focal_length / pos_view.z * sqrt_two_sigma;
   float4 transform = float4(v_0.x, -v_0.y, v_0.y, v_0.x) * projected_scale.xyxy;
+  if (any(isnan(projected_scale)) || any(isinf(projected_scale)) ||
+      max(abs(projected_scale.x), abs(projected_scale.y)) > 65504.0f)
+  {
+    transform = float4(0.0f, 0.0f, 0.0f, 0.0f);
+  }
 
   // WDD-2026-04-06-GlobalDepth32-UpgradeComment:GlobalSortStep4-v2
   // Build global sortable key directly from clip depth with 32-bit precision.

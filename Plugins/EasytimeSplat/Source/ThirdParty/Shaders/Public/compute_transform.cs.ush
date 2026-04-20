@@ -36,6 +36,11 @@ RWBuffer<float4> transforms;
   float4 pos_local = unpack_pos(positions[splat_id], pos_scale_cm, pos_min_cm);
   float3 pos_view = mul(pos_local, local_to_view);
 
+  if (pos_view.z >= -1e-4f && pos_view.z <= 1e-4f) {
+    transforms[splat_id] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    return;
+  }
+
   float3x3 sig = unpack_cov_mat(covariances[splat_id]);
 
   float3x3 W = float3x3(local_to_view[0].xyz, local_to_view[1].xyz,
@@ -59,12 +64,19 @@ RWBuffer<float4> transforms;
 
   float det = sig_p_00 * sig_p_11 - sig_p_01_10 * sig_p_01_10;
   float trace = sig_p_00 + sig_p_11;
-  float sqrt_disc = sqrt(trace * trace - 4 * det);
+  float sqrt_disc = sqrt(max(trace * trace - 4.0f * det, 0.0f));
   float2 two_lmb = float2(trace + sqrt_disc, trace - sqrt_disc);
-  float2 sqrt_two_sigma = sqrt(two_lmb);
-  float2 v_0 = normalize(float2(sig_p_01_10, two_lmb.x / 2.f - sig_p_00));
+  float2 sqrt_two_sigma = sqrt(max(two_lmb, float2(0.0f, 0.0f)));
+  float2 v_0_raw = float2(sig_p_01_10, two_lmb.x / 2.0f - sig_p_00);
+  float v_len_sq = dot(v_0_raw, v_0_raw);
+  float2 v_0 = (v_len_sq > 1e-12f) ? v_0_raw * rsqrt(v_len_sq) : float2(1.0f, 0.0f);
 
   float2 scale = two_focal_length / pos_view.z * sqrt_two_sigma;
-  transforms[splat_id] = half4(v_0.x, -v_0.y, v_0.y, v_0.x) * scale.xyxy;
+  if (any(isnan(scale)) || any(isinf(scale)) || max(abs(scale.x), abs(scale.y)) > 65504.0f) {
+    transforms[splat_id] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    return;
+  }
+
+  transforms[splat_id] = float4(v_0.x, -v_0.y, v_0.y, v_0.x) * scale.xyxy;
 }
 

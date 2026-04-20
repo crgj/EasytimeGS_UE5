@@ -418,6 +418,11 @@ bool FSplatSceneProxy::IsVisible(const FSceneView& View) const
 {
 	check(Asset);
 
+	if (bEditorInteractionFrozen)
+	{
+		return false;
+	}
+
 	bool bIsShown = IsShown(&View);
 	bool bIsInScene = &GetScene() == View.Family->Scene;
 	bool bIsVisible = bIsShown && bIsInScene;

@@ -199,6 +199,11 @@ public:
 
 	void SetOpacity_RenderThread(float InOpacity) { Opacity = FMath::Clamp(InOpacity, 0.0f, 1.0f); }
 	float GetOpacity() const { return Opacity; }
+	void SetEditorInteractionFrozen_RenderThread(bool bInFrozen)
+	{
+		bEditorInteractionFrozen = bInFrozen;
+	}
+	bool IsEditorInteractionFrozen() const { return bEditorInteractionFrozen; }
 	void SetColorControls_RenderThread(
 		float InBrightness,
 		float InContrast,
@@ -293,6 +298,7 @@ private:
 	uint32 SelectedSHDegree = 0;
 	float CurrentFrame = 0.0f;
 	float Opacity = 1.0f;
+	bool bEditorInteractionFrozen = false;
 	float Brightness = 0.0f;
 	float Contrast = 1.0f;
 	FVector3f ColorTint = FVector3f(1.0f, 1.0f, 1.0f);

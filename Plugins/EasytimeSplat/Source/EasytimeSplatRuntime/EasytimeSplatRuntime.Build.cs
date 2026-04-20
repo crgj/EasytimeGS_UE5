@@ -23,6 +23,8 @@ public class EasytimeSplatRuntime : ModuleRules
 				"RenderCore",
 				"Renderer",
 				"RHI",
+				"Slate",
+				"SlateCore",
 			}
 		);
 

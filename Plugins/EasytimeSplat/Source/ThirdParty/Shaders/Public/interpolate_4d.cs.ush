@@ -151,7 +151,10 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     {
         r1 = -r1;
     }
-    float4 r_interp = normalize(lerp(r0, r1, alpha_rot)); // NLerp (shortest arc)
+    float4 r_interp_raw = lerp(r0, r1, alpha_rot); // NLerp (shortest arc)
+    float r_len_sq = dot(r_interp_raw, r_interp_raw);
+    float4 r_interp =
+        (r_len_sq > 1e-12f) ? r_interp_raw * rsqrt(r_len_sq) : float4(0.0f, 0.0f, 0.0f, 1.0f);
     
     // rot_bank is already converted to UE basis during import.
     // Do NOT swizzle again here, otherwise rotation is applied twice.
@@ -161,7 +164,7 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     float qw = r_interp.w;
     
     // Compute Covariance Sigma = R * S * S^T * R^T
-    float3 s = scales[i] * 100.0f; // CM
+    float3 s = clamp(abs(scales[i]) * 100.0f, float3(1e-4f, 1e-4f, 1e-4f), float3(1e4f, 1e4f, 1e4f)); // CM
     // Construct R matrix
     float3x3 R;
     R[0][0] = 1.0f - 2.0f * (qy * qy + qz * qz);
@@ -177,6 +180,17 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     float3x3 S = float3x3(s.x, 0, 0, 0, s.y, 0, 0, 0, s.z);
     float3x3 RS = mul(R, S);
     float3x3 Sigma = mul(RS, transpose(RS));
+    if (any(isnan(Sigma[0])) || any(isnan(Sigma[1])) || any(isnan(Sigma[2])) ||
+        any(isinf(Sigma[0])) || any(isinf(Sigma[1])) || any(isinf(Sigma[2])))
+    {
+        Sigma = float3x3(
+            1e-4f, 0.0f, 0.0f,
+            0.0f, 1e-4f, 0.0f,
+            0.0f, 0.0f, 1e-4f);
+    }
+    Sigma[0] = clamp(Sigma[0], float3(-1e8f, -1e8f, -1e8f), float3(1e8f, 1e8f, 1e8f));
+    Sigma[1] = clamp(Sigma[1], float3(-1e8f, -1e8f, -1e8f), float3(1e8f, 1e8f, 1e8f));
+    Sigma[2] = clamp(Sigma[2], float3(-1e8f, -1e8f, -1e8f), float3(1e8f, 1e8f, 1e8f));
     
     // Pack Covariance
     uint xx = to_custom_float(Sigma[0][0], 0, 5, 5);

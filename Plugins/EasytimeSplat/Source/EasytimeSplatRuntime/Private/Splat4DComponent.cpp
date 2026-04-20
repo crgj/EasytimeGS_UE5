@@ -4,6 +4,7 @@
 
 #include "Splat4DComponent.h"
 #include "Splat4DActor.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Rendering/SplatSceneProxy.h"
 
 USplat4DComponent::USplat4DComponent()
@@ -13,8 +14,49 @@ USplat4DComponent::USplat4DComponent()
 	bTickInEditor = true;
 }
 
+bool USplat4DComponent::ShouldFreezeEditorInteraction() const
+{
+#if WITH_EDITOR
+	return GIsEditor &&
+	       FSlateApplication::IsInitialized() &&
+	       FSlateApplication::Get().GetPressedMouseButtons().Num() > 0;
+#else
+	return false;
+#endif
+}
+
+void USplat4DComponent::UpdateEditorInteractionFreeze()
+{
+	const bool bFreeze = ShouldFreezeEditorInteraction();
+	if (bFreeze == bLastEditorInteractionFrozen)
+	{
+		return;
+	}
+
+	bLastEditorInteractionFrozen = bFreeze;
+
+	if (!SceneProxy)
+	{
+		return;
+	}
+
+	ENQUEUE_RENDER_COMMAND(UpdateSplat4DEditorInteractionFreeze)(
+		[Proxy = static_cast<Easytime::Splat::FSplatSceneProxy*>(SceneProxy),
+	     bFreeze](FRHICommandListImmediate& RHICmdList)
+		{
+			Proxy->SetEditorInteractionFrozen_RenderThread(bFreeze);
+		});
+}
+
 void USplat4DComponent::ApplyCurrentFrame()
 {
+	UpdateEditorInteractionFreeze();
+
+	if (ShouldFreezeEditorInteraction())
+	{
+		return;
+	}
+
 	if (SceneProxy)
 	{
 		float Frame = CurrentFrame;
@@ -52,6 +94,13 @@ void USplat4DComponent::ApplyCurrentFrame()
 
 void USplat4DComponent::ForceRefreshSplatRenderData()
 {
+	UpdateEditorInteractionFreeze();
+
+	if (ShouldFreezeEditorInteraction())
+	{
+		return;
+	}
+
 	ApplyCurrentFrame();
 	UpdateBounds();
 	MarkRenderTransformDirty();
@@ -63,7 +112,11 @@ void USplat4DComponent::OnUpdateTransform(
 	ETeleportType Teleport)
 {
 	Super::OnUpdateTransform(UpdateTransformFlags, Teleport);
-	ForceRefreshSplatRenderData();
+	UpdateEditorInteractionFreeze();
+	if (!ShouldFreezeEditorInteraction())
+	{
+		ForceRefreshSplatRenderData();
+	}
 }
 
 void USplat4DComponent::TickComponent(
@@ -72,6 +125,8 @@ void USplat4DComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	UpdateEditorInteractionFreeze();
 
 	ForceRefreshSplatRenderData();
 }
