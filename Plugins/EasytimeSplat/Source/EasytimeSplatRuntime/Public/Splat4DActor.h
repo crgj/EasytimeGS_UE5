@@ -53,6 +53,38 @@ public:
 			UIMax = "1"))
 	float Opacity = 1.0f;
 
+	/** Brightness offset applied to all splat colors after SH evaluation. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Splat 4D|Color",
+		meta = (
+			ClampMin = "-1",
+			ClampMax = "1",
+			UIMin = "-1",
+			UIMax = "1"))
+	float Brightness = 0.0f;
+
+	/** Contrast multiplier applied around 0.5 after SH evaluation. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Splat 4D|Color",
+		meta = (
+			ClampMin = "0",
+			ClampMax = "4",
+			UIMin = "0",
+			UIMax = "4"))
+	float Contrast = 1.0f;
+
+	/** Per-channel color tint applied before brightness and contrast. */
+	UPROPERTY(
+		EditAnywhere,
+		BlueprintReadWrite,
+		Category = "Splat 4D|Color",
+		meta = (HideAlphaChannel))
+	FLinearColor ColorTint = FLinearColor::White;
+
 	virtual void Tick(float DeltaTime) override;
 	virtual bool ShouldTickIfViewportsOnly() const override { return true; }
 

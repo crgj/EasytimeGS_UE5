@@ -199,6 +199,18 @@ public:
 
 	void SetOpacity_RenderThread(float InOpacity) { Opacity = FMath::Clamp(InOpacity, 0.0f, 1.0f); }
 	float GetOpacity() const { return Opacity; }
+	void SetColorControls_RenderThread(
+		float InBrightness,
+		float InContrast,
+		const FLinearColor& InColorTint)
+	{
+		Brightness = FMath::Clamp(InBrightness, -1.0f, 1.0f);
+		Contrast = FMath::Clamp(InContrast, 0.0f, 4.0f);
+		ColorTint = FVector3f(InColorTint.R, InColorTint.G, InColorTint.B);
+	}
+	float GetBrightness() const { return Brightness; }
+	float GetContrast() const { return Contrast; }
+	FVector3f GetColorTint() const { return ColorTint; }
 
 	FUnorderedAccessViewRHIRef GetDynamicPositionsUAV() const
 	{
@@ -281,6 +293,9 @@ private:
 	uint32 SelectedSHDegree = 0;
 	float CurrentFrame = 0.0f;
 	float Opacity = 1.0f;
+	float Brightness = 0.0f;
+	float Contrast = 1.0f;
+	FVector3f ColorTint = FVector3f(1.0f, 1.0f, 1.0f);
 	std::optional<FSplatGPUToGPUBuffer> Indices;
 
 	std::optional<FSplatGPUToGPUBuffer> DynamicPositions;

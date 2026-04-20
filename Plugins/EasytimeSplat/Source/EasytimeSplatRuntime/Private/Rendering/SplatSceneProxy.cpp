@@ -40,15 +40,21 @@ FSplatSceneProxy::FSplatSceneProxy(USplatComponent& Component)
 		bIsSortingOnGPU = true;
 	}
 	SelectedSHDegree = FMath::Min<uint32>(Component.GetMaxSHDegree(), Asset ? Asset->GetAvailableSHDegree() : 0);
+	Brightness = Component.GetBrightness();
+	Contrast = Component.GetContrast();
+	const FLinearColor ComponentColorTint = Component.GetColorTint();
+	ColorTint = FVector3f(ComponentColorTint.R, ComponentColorTint.G, ComponentColorTint.B);
 	EASYTIME_LOGL(
-		"[SceneProxy Ctor] Name=%s Is4D=%d Use4DInterp=%d NumSplats=%u SortGPU=%d SHDegree=%u SHTriplets=%u",
+		"[SceneProxy Ctor] Name=%s Is4D=%d Use4DInterp=%d NumSplats=%u SortGPU=%d SHDegree=%u SHTriplets=%u Brightness=%.3f Contrast=%.3f",
 		*GetResourceName().ToString(),
 		bIs4D ? 1 : 0,
 		bUse4DInterpolation ? 1 : 0,
 		Asset ? Asset->GetNumSplats() : 0,
 		bIsSortingOnGPU ? 1 : 0,
 		SelectedSHDegree,
-		Asset ? Asset->GetNumSHTriplets() : 0);
+		Asset ? Asset->GetNumSHTriplets() : 0,
+		Brightness,
+		Contrast);
 
 	if (bIsSortingOnGPU)
 	{

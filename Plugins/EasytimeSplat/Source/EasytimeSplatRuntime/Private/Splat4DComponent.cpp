@@ -32,15 +32,38 @@ void USplat4DComponent::ApplyCurrentFrame()
 		}
 
 		float OpacityValue = Opacity;
+		float BrightnessValue = GetBrightness();
+		float ContrastValue = GetContrast();
+		FLinearColor ColorTintValue = GetColorTint();
 
 		ENQUEUE_RENDER_COMMAND(UpdateSplat4DFrame)(
 			[Proxy = (Easytime::Splat::FSplatSceneProxy*)SceneProxy,
-		     Frame, OpacityValue](FRHICommandListImmediate& RHICmdList)
+		     Frame, OpacityValue, BrightnessValue, ContrastValue, ColorTintValue](FRHICommandListImmediate& RHICmdList)
 			{ 
 				Proxy->SetCurrentFrame_RenderThread(Frame); 
 				Proxy->SetOpacity_RenderThread(OpacityValue);
+				Proxy->SetColorControls_RenderThread(
+					BrightnessValue,
+					ContrastValue,
+					ColorTintValue);
 			});
 	}
+}
+
+void USplat4DComponent::ForceRefreshSplatRenderData()
+{
+	ApplyCurrentFrame();
+	UpdateBounds();
+	MarkRenderTransformDirty();
+	MarkRenderDynamicDataDirty();
+}
+
+void USplat4DComponent::OnUpdateTransform(
+	EUpdateTransformFlags UpdateTransformFlags,
+	ETeleportType Teleport)
+{
+	Super::OnUpdateTransform(UpdateTransformFlags, Teleport);
+	ForceRefreshSplatRenderData();
 }
 
 void USplat4DComponent::TickComponent(
@@ -49,7 +72,8 @@ void USplat4DComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	ApplyCurrentFrame();
+
+	ForceRefreshSplatRenderData();
 }
 
 #if WITH_EDITOR
@@ -67,7 +91,6 @@ void USplat4DComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyCh
 		}
 	}
 
-	ApplyCurrentFrame();
-	// Don't call MarkRenderDynamicDataDirty here - ApplyCurrentFrame already enqueues render command
+	ForceRefreshSplatRenderData();
 }
 #endif

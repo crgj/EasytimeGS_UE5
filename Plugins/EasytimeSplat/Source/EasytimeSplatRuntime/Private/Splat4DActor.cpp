@@ -40,9 +40,12 @@ void ASplat4DActor::SyncPropertiesToComponent(bool bRecreateRenderState)
 	if (Splat4DComponent)
 	{
 		Splat4DComponent->SetMaxSHDegree(MaxSHDegree);
+		Splat4DComponent->SetBrightness(Brightness);
+		Splat4DComponent->SetContrast(Contrast);
+		Splat4DComponent->SetColorTint(ColorTint);
 		Splat4DComponent->CurrentFrame = CurrentFrame;
 		Splat4DComponent->Opacity = Opacity;
-		Splat4DComponent->ApplyCurrentFrame();
+		Splat4DComponent->ForceRefreshSplatRenderData();
 		
 		// Only recreate render state for structural changes
 		// Opacity/Frame changes are handled via ApplyCurrentFrame's render command

@@ -50,6 +50,9 @@ public:
 	 */
 	TObjectPtr<USplatAsset> GetAsset() const { return Asset; }
 	int32 GetMaxSHDegree() const { return MaxSHDegree; }
+	float GetBrightness() const { return Brightness; }
+	float GetContrast() const { return Contrast; }
+	FLinearColor GetColorTint() const { return ColorTint; }
 	void SetMaxSHDegree(int32 InMaxSHDegree)
 	{
 		const int32 Clamped = FMath::Clamp(InMaxSHDegree, 0, 3);
@@ -61,6 +64,41 @@ public:
 		MaxSHDegree = Clamped;
 		MarkRenderStateDirty();
 	}
+	void SetBrightness(float InBrightness)
+	{
+		const float Clamped = FMath::Clamp(InBrightness, -1.0f, 1.0f);
+		if (FMath::IsNearlyEqual(Brightness, Clamped))
+		{
+			return;
+		}
+
+		Brightness = Clamped;
+		ApplyColorControls();
+	}
+	void SetContrast(float InContrast)
+	{
+		const float Clamped = FMath::Clamp(InContrast, 0.0f, 4.0f);
+		if (FMath::IsNearlyEqual(Contrast, Clamped))
+		{
+			return;
+		}
+
+		Contrast = Clamped;
+		ApplyColorControls();
+	}
+	void SetColorTint(FLinearColor InColorTint)
+	{
+		InColorTint.A = 1.0f;
+		if (ColorTint.Equals(InColorTint))
+		{
+			return;
+		}
+
+		ColorTint = InColorTint;
+		ApplyColorControls();
+	}
+
+	void ApplyColorControls();
 
 	/**
 	 * Sets the asset and refreshes render/collision state.
@@ -104,6 +142,36 @@ private:
 			UIMax = "3",
 			ToolTip = "0 = DC only, 1 = SH1, 2 = SH2, 3 = SH3. The runtime will clamp to the highest order actually stored in the asset."))
 	int32 MaxSHDegree = 3;
+
+	UPROPERTY(
+		EditAnywhere,
+		Category = "Splat|Color",
+		meta = (
+			ClampMin = "-1",
+			ClampMax = "1",
+			UIMin = "-1",
+			UIMax = "1",
+			ToolTip = "Brightness offset applied to every splat color after SH evaluation. 0 is neutral."))
+	float Brightness = 0.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		Category = "Splat|Color",
+		meta = (
+			ClampMin = "0",
+			ClampMax = "4",
+			UIMin = "0",
+			UIMax = "4",
+			ToolTip = "Contrast multiplier applied around 0.5 after SH evaluation. 1 is neutral."))
+	float Contrast = 1.0f;
+
+	UPROPERTY(
+		EditAnywhere,
+		Category = "Splat|Color",
+		meta = (
+			HideAlphaChannel,
+			ToolTip = "Per-channel color tint applied before brightness and contrast. White is neutral."))
+	FLinearColor ColorTint = FLinearColor::White;
 
 	UPROPERTY()
 	TObjectPtr<UBodySetup> BodySetup;

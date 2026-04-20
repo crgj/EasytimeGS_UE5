@@ -4,6 +4,7 @@
 
 #include "SplatAsset.h"
 #include "SplatConstants.h"
+#include "Logging.h"
 #include "SplatSettings.h"
 
 #include "CompGeom/ConvexHull3.h"
@@ -764,20 +765,60 @@ bool USplat4DAsset::EnsureExpandedRuntimeData()
 	if (GetNumSplats() > 0 && XYZBank && RotBank && DCBank && LifetimeMuW && Scales &&
 		GetPositions().Num() == static_cast<int32>(GetNumSplats()))
 	{
+		EASYTIME_LOGL(
+			"[SOG4 Expand] Reusing existing expanded data asset=%s splats=%u xyzBanks=%u rotBanks=%u dcBanks=%u xyzStride=%d rotStride=%d dcStride=%d compressed=%d compressedBytes=%d",
+			*GetPathName(),
+			GetNumSplats(),
+			NumXYZBanks,
+			NumRotBanks,
+			NumDCBanks,
+			XYZStride,
+			RotStride,
+			DCStride,
+			bStoreAsCompressedSOG4 ? 1 : 0,
+			CompressedSOG4.Num());
 		return true;
 	}
 
 	if (bStoreAsCompressedSOG4 && CompressedSOG4.Num() > 0)
 	{
+		EASYTIME_LOGL(
+			"[SOG4 Expand] Decoding compressed asset=%s compressedBytes=%d savedSplats=%d currentSplats=%u",
+			*GetPathName(),
+			CompressedSOG4.Num(),
+			CompressedSOG4NumSplats,
+			GetNumSplats());
 		if (!DecodeCompressedSOG4ToExpanded())
 		{
+			EASYTIME_LOGE("[SOG4 Expand] Decode failed asset=%s", *GetPathName());
 			return false;
 		}
 		USplatAsset::BeginInit();
 		BeginInit();
+		EASYTIME_LOGL(
+			"[SOG4 Expand] Decode finished asset=%s splats=%u xyzBanks=%u rotBanks=%u dcBanks=%u xyzStride=%d rotStride=%d dcStride=%d",
+			*GetPathName(),
+			GetNumSplats(),
+			NumXYZBanks,
+			NumRotBanks,
+			NumDCBanks,
+			XYZStride,
+			RotStride,
+			DCStride);
 		return true;
 	}
 
+	EASYTIME_LOGW(
+		"[SOG4 Expand] No usable data asset=%s splats=%u compressed=%d compressedBytes=%d xyz=%d rot=%d dc=%d life=%d scale=%d",
+		*GetPathName(),
+		GetNumSplats(),
+		bStoreAsCompressedSOG4 ? 1 : 0,
+		CompressedSOG4.Num(),
+		XYZBank ? 1 : 0,
+		RotBank ? 1 : 0,
+		DCBank ? 1 : 0,
+		LifetimeMuW ? 1 : 0,
+		Scales ? 1 : 0);
 	return false;
 }
 
@@ -955,6 +996,58 @@ bool USplat4DAsset::DecodeCompressedSOG4ToExpanded()
 		}
 	}
 
+	int32 LocalNumDCBanks = 0;
+	TArray<FVector3f> DCBankData;
+	int32 LocalDCStride = 1;
+	bool bUsedParamsLifetime = false;
+	bool bUsedLegacyLifetime = false;
+	const TArray<TSharedPtr<FJsonValue>>* DCBankArray = nullptr;
+	if (MetaObject->TryGetArrayField(TEXT("dc_bank"), DCBankArray) && DCBankArray && DCBankArray->Num() > 0)
+	{
+		LocalNumDCBanks = DCBankArray->Num();
+		LocalDCStride = GetJsonIntFieldFlexible(
+			CustomObject,
+			TEXT("features_dc_bank_keyframe_stride"),
+			GetJsonIntFieldFlexible(
+				MetaObject,
+				TEXT("features_dc_bank_keyframe_stride"),
+				GetJsonIntFieldFlexible(MetaObject, TEXT("dc_bank_stride"), 1)));
+		LocalDCStride = FMath::Max(1, LocalDCStride);
+		DCBankData.SetNumUninitialized(Count * LocalNumDCBanks);
+
+		for (int32 BankIndex = 0; BankIndex < LocalNumDCBanks; ++BankIndex)
+		{
+			const TSharedPtr<FJsonObject> BankObject = (*DCBankArray)[BankIndex]->AsObject();
+			const TArray<float> DCBankCodebook =
+				BankObject.IsValid() ? GetJsonFloatArrayField(BankObject, TEXT("codebook")) : TArray<float>();
+			TArray<FString> Files;
+			FSOGImageRGBA8 DCBankImage;
+			const bool bHasImage =
+				BankObject.IsValid() &&
+				DCBankCodebook.Num() > 0 &&
+				TryGetFilesField(BankObject, Files) &&
+				Files.Num() >= 1 &&
+				TryLoadZipImageRGBA8(ZipReader, Files[0], DCBankImage) &&
+				DCBankImage.HasPixelsForCount(Count);
+
+			for (int32 Index = 0; Index < Count; ++Index)
+			{
+				if (bHasImage)
+				{
+					const int32 Base = Index * 4;
+					DCBankData[Index * LocalNumDCBanks + BankIndex] = FVector3f(
+						GetCodebookValueOrDefault(DCBankCodebook, DCBankImage.Bytes[Base + 0]),
+						GetCodebookValueOrDefault(DCBankCodebook, DCBankImage.Bytes[Base + 1]),
+						GetCodebookValueOrDefault(DCBankCodebook, DCBankImage.Bytes[Base + 2]));
+				}
+				else
+				{
+					DCBankData[Index * LocalNumDCBanks + BankIndex] = FVector3f::ZeroVector;
+				}
+			}
+		}
+	}
+
 	int32 LocalNumSHTriplets = 0;
 	TArray<FVector3f> LocalSHCoefficients;
 	bool bDecodedSH0 = false;
@@ -989,6 +1082,19 @@ bool USplat4DAsset::DecodeCompressedSOG4ToExpanded()
 		for (int32 Index = 0; Index < Count; ++Index)
 		{
 			ColorsLinear[Index].W = ToAlphaLinearFloat(OpacityLogit[Index]);
+		}
+	}
+	if (LocalNumDCBanks > 0)
+	{
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FVector3f& DC0 = DCBankData[Index * LocalNumDCBanks];
+			const float BaseAlpha = ColorsLinear[Index].W;
+			ColorsLinear[Index] = FVector4f(
+				ToColorLinearFloat(DC0.X),
+				ToColorLinearFloat(DC0.Y),
+				ToColorLinearFloat(DC0.Z),
+				BaseAlpha);
 		}
 	}
 
@@ -1162,6 +1268,7 @@ bool USplat4DAsset::DecodeCompressedSOG4ToExpanded()
 	const TSharedPtr<FJsonObject>* ParamsObjPtr = nullptr;
 	if (MetaObject->TryGetObjectField(TEXT("params"), ParamsObjPtr) && ParamsObjPtr)
 	{
+		bUsedParamsLifetime = true;
 		TArray<FString> Files;
 		if (TryGetFilesField(*ParamsObjPtr, Files) && Files.Num() >= 1)
 		{
@@ -1189,14 +1296,66 @@ bool USplat4DAsset::DecodeCompressedSOG4ToExpanded()
 			}
 		}
 	}
+	else
+	{
+		const TSharedPtr<FJsonObject>* LifetimeObjPtr = nullptr;
+		if (MetaObject->TryGetObjectField(TEXT("lifetime"), LifetimeObjPtr) && LifetimeObjPtr)
+		{
+			bUsedLegacyLifetime = true;
+			TArray<FString> Files;
+			const TArray<float> MinsArray = GetJsonFloatArrayField(*LifetimeObjPtr, TEXT("mins"));
+			const TArray<float> MaxsArray = GetJsonFloatArrayField(*LifetimeObjPtr, TEXT("maxs"));
+			if (TryGetFilesField(*LifetimeObjPtr, Files) && Files.Num() >= 1 &&
+				MinsArray.Num() >= 2 && MaxsArray.Num() >= 2)
+			{
+				FSOGImageRGBA8 LifetimeImage;
+				if (TryLoadZipImageRGBA8(ZipReader, Files[0], LifetimeImage) &&
+					LifetimeImage.HasPixelsForCount(Count))
+				{
+					const float MinMu = MinsArray[0];
+					const float MaxMu = MaxsArray[0];
+					const float MinW = MinsArray[1];
+					const float MaxW = MaxsArray[1];
+					for (int32 Index = 0; Index < Count; ++Index)
+					{
+						const int32 Base = Index * 4;
+						const float Mu =
+							(static_cast<float>(LifetimeImage.Bytes[Base + 0]) / 255.0f) *
+								(MaxMu - MinMu) +
+							MinMu;
+						const float W =
+							(static_cast<float>(LifetimeImage.Bytes[Base + 1]) / 255.0f) *
+								(MaxW - MinW) +
+							MinW;
+						LifetimeData[Index] = FVector2f(Mu, FMath::Max(W, 1e-3f));
+					}
+				}
+			}
+		}
+	}
 
 	TotalFrames = LocalTotalFrames;
 	XYZStride = LocalXYZStride;
 	RotStride = LocalRotStride;
-	DCStride = 1;
+	DCStride = LocalDCStride;
 	NumXYZBanks = LocalNumXYZBanks;
 	NumRotBanks = LocalNumRotBanks;
-	NumDCBanks = 0;
+	NumDCBanks = LocalNumDCBanks;
+	EASYTIME_LOGL(
+		"[SOG4 Runtime Decode] asset=%s splats=%d frames=%d xyzBanks=%d rotBanks=%d dcBanks=%d xyzStride=%d rotStride=%d dcStride=%d lifetime=params:%d legacy:%d colors=%d opacity=%d",
+		*GetPathName(),
+		Count,
+		LocalTotalFrames,
+		LocalNumXYZBanks,
+		LocalNumRotBanks,
+		LocalNumDCBanks,
+		LocalXYZStride,
+		LocalRotStride,
+		LocalDCStride,
+		bUsedParamsLifetime ? 1 : 0,
+		bUsedLegacyLifetime ? 1 : 0,
+		ColorsLinear.Num(),
+		OpacityLogit.Num());
 
 	TArray<FVector3f> PositionsUE;
 	PositionsUE.SetNumUninitialized(Count);
@@ -1234,10 +1393,12 @@ bool USplat4DAsset::DecodeCompressedSOG4ToExpanded()
 	RotData.Assign(RotBankData);
 	RotBank = Easytime::Splat::TSplatStaticBuffer(std::move(RotData));
 
-	TArray<FVector3f> DummyDCBank;
-	DummyDCBank.Add(FVector3f::ZeroVector);
 	TStaticMeshVertexData<FVector3f> DCData;
-	DCData.Assign(DummyDCBank);
+	if (DCBankData.Num() == 0)
+	{
+		DCBankData.Add(FVector3f::ZeroVector);
+	}
+	DCData.Assign(DCBankData);
 	DCBank = Easytime::Splat::TSplatStaticBuffer(std::move(DCData));
 
 	TStaticMeshVertexData<FVector2f> LData;

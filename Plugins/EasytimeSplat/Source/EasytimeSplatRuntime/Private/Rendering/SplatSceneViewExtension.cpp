@@ -82,6 +82,9 @@ SetSharedParameters(const FSceneView& View, FSplatSceneProxy* Proxy)
 	Params.sh_degree = Proxy->GetSelectedSHDegree();
 	Params.sh_num_triplets = Proxy->GetNumSHTriplets();
 	Params.opacity = Proxy->GetOpacity();
+	Params.brightness = Proxy->GetBrightness();
+	Params.contrast = Proxy->GetContrast();
+	Params.color_tint = Proxy->GetColorTint();
 	FVector3f PosMinCM, PosScaleCM;
 	Params.Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	Params.Positions.pos_min_cm = PosMinCM;
@@ -336,10 +339,19 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 	uint32 TotalVisibleSplats = 0;
 	const TArray<FGlobalVisibleSplatRange> GlobalRanges =
 		BuildGlobalVisibleSplatRanges(SortedProxies, TotalVisibleSplats);
+	bool bHasVisible4DProxy = false;
+	for (const FGlobalVisibleSplatRange& Range : GlobalRanges)
+	{
+		if (Range.Proxy && Range.Proxy->Uses4DInterpolation())
+		{
+			bHasVisible4DProxy = true;
+			break;
+		}
+	}
 	const bool bEnableGlobalSortStaging =
 		CVarSplatGlobalSortExperimental.GetValueOnRenderThread() != 0;
 	FGlobalSortStagingBuffers GlobalSortBuffers;
-	if (bEnableGlobalSortStaging && GlobalRanges.Num() > 1)
+	if (bEnableGlobalSortStaging && !bHasVisible4DProxy && GlobalRanges.Num() > 1)
 	{
 		GlobalSortBuffers = CreateGlobalSortStagingBuffers(
 			GraphBuilder, TotalVisibleSplats, GlobalRanges.Num());

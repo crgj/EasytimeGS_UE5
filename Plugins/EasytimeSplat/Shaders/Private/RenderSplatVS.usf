@@ -15,6 +15,9 @@ float4x4 local_to_world;
 uint sh_degree;
 uint sh_num_triplets;
 float opacity;
+float brightness;
+float contrast;
+float3 color_tint;
 float3 pos_scale_cm;
 float3 pos_min_cm;
 

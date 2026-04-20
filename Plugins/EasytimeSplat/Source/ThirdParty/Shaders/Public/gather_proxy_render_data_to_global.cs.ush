@@ -83,6 +83,14 @@ float3 eval_sh(uint splat_id, float3 view_dir_src)
   return result;
 }
 
+float3 apply_color_controls(float3 color)
+{
+  color *= color_tint;
+  color = (color - 0.5f) * contrast + 0.5f;
+  color += brightness;
+  return max(color, 0.0f);
+}
+
 [numthreads(THREAD_GROUP_SIZE_X, 1, 1)] void main(
     uint3 dispatch_thread_id : SV_DispatchThreadID) {
   uint local_id = dispatch_thread_id.x;
@@ -147,6 +155,7 @@ float3 eval_sh(uint splat_id, float3 view_dir_src)
     view_dir_src *= rsqrt(max(dot(view_dir_src, view_dir_src), 1e-8f));
     c.rgb = max(c.rgb + eval_sh(local_id, view_dir_src), 0.0f);
   }
+  c.rgb = apply_color_controls(c.rgb);
   c.a *= opacity;
   out_global_colors[global_id] = c;
 }

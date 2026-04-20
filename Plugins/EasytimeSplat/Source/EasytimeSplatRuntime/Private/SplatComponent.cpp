@@ -87,6 +87,32 @@ UBodySetup* USplatComponent::GetBodySetup()
 	return BodySetup;
 }
 
+void USplatComponent::ApplyColorControls()
+{
+	if (!SceneProxy)
+	{
+		return;
+	}
+
+	const float BrightnessValue = Brightness;
+	const float ContrastValue = Contrast;
+	const FLinearColor ColorTintValue = ColorTint;
+
+	ENQUEUE_RENDER_COMMAND(UpdateSplatColorControls)(
+		[Proxy = static_cast<FSplatSceneProxy*>(SceneProxy),
+	     BrightnessValue,
+	     ContrastValue,
+	     ColorTintValue](FRHICommandListImmediate& RHICmdList)
+		{
+			Proxy->SetColorControls_RenderThread(
+				BrightnessValue,
+				ContrastValue,
+				ColorTintValue);
+		});
+
+	MarkRenderDynamicDataDirty();
+}
+
 #if WITH_EDITOR
 void USplatComponent::GetUsedMaterials(
 	TArray<UMaterialInterface*>& OutMaterials, bool bGetDebugMaterials) const
@@ -113,6 +139,21 @@ void USplatComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 			*GetNameSafe(this));
 		RecreateRenderState_Concurrent();
 		return;
+	}
+
+	if (PropertyChangedEvent.Property)
+	{
+		const FName PropertyName = PropertyChangedEvent.Property->GetFName();
+		if (PropertyName == GET_MEMBER_NAME_CHECKED(USplatComponent, Brightness) ||
+		    PropertyName == GET_MEMBER_NAME_CHECKED(USplatComponent, Contrast) ||
+		    PropertyName == GET_MEMBER_NAME_CHECKED(USplatComponent, ColorTint))
+		{
+			Brightness = FMath::Clamp(Brightness, -1.0f, 1.0f);
+			Contrast = FMath::Clamp(Contrast, 0.0f, 4.0f);
+			ColorTint.A = 1.0f;
+			ApplyColorControls();
+			return;
+		}
 	}
 
 	MarkRenderStateDirty();

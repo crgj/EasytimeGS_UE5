@@ -603,6 +603,9 @@ FRDGPassRef GatherProxyRenderDataToGlobal(
 	Params->sh_num_triplets = Proxy->GetNumSHTriplets();
 	Params->two_focal_length = 2.f * GetFocalLength(View);
 	Params->opacity = Proxy->GetOpacity();
+	Params->brightness = Proxy->GetBrightness();
+	Params->contrast = Proxy->GetContrast();
+	Params->color_tint = Proxy->GetColorTint();
 	Params->world_camera_origin = GetOrigin(View);
 	FVector3f PosMinCM, PosScaleCM;
 	Params->Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);

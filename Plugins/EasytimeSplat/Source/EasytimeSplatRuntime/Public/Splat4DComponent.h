@@ -26,11 +26,15 @@ public:
 	float Opacity = 1.0f;
 
 	void ApplyCurrentFrame();
+	void ForceRefreshSplatRenderData();
 
 	virtual void TickComponent(
 		float DeltaTime,
 		enum ELevelTick TickType,
 		FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void OnUpdateTransform(
+		EUpdateTransformFlags UpdateTransformFlags,
+		ETeleportType Teleport) override;
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

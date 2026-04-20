@@ -107,6 +107,14 @@ float3 eval_sh(uint splat_id, float3 view_dir)
   return result;
 }
 
+float3 apply_color_controls(float3 color)
+{
+  color *= color_tint;
+  color = (color - 0.5f) * contrast + 0.5f;
+  color += brightness;
+  return max(color, 0.0f);
+}
+
 /**
  * Generates a vertex bounding a splat.
  *
@@ -195,6 +203,7 @@ void main(in uint in_id : SV_VertexID,
   view_dir_src *= rsqrt(max(dot(view_dir_src, view_dir_src), 1e-8f));
 
   base_color.rgb = max(base_color.rgb + eval_sh(splat_id, view_dir_src), 0.0f);
+  base_color.rgb = apply_color_controls(base_color.rgb);
   base_color.a *= opacity;
   out_color = base_color;
 }
