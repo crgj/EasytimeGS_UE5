@@ -20,6 +20,7 @@ float contrast;
 float3 color_tint;
 float3 pos_scale_cm;
 float3 pos_min_cm;
+uint bUseFloatPositions;
 
 /**
  * The View uniform buffer Unreal uses in UE 5.4+ uses DoubleFloat types.

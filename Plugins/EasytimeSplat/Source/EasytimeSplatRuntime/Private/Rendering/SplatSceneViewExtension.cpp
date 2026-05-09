@@ -89,6 +89,9 @@ SetSharedParameters(const FSceneView& View, FSplatSceneProxy* Proxy)
 	Params.Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	Params.Positions.pos_min_cm = PosMinCM;
 	Params.Positions.pos_scale_cm = PosScaleCM;
+	Params.bUseFloatPositions = Proxy->Uses4DInterpolation() ? 1u : 0u;
+	Params.positions_float =
+		Proxy->Uses4DInterpolation() ? Proxy->GetDynamicPositionsSRV() : nullptr;
 	Params.transforms = Proxy->GetTransformsSRV();
 	Params.colors = Proxy->GetColorsSRV();
 	Params.sh_coefficients = Proxy->GetSHCoefficientsSRV();

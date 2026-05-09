@@ -22,6 +22,7 @@ Buffer<uint> indices;
 Buffer<uint2> indices;
 #endif
 Buffer<uint> positions;
+Buffer<float4> positions_float;
 Buffer<float4> transforms;
 Buffer<float4> colors;
 Buffer<float3> sh_coefficients;
@@ -136,8 +137,9 @@ void main(in uint in_id : SV_VertexID,
   // needed if explicitly adding .x.
   uint splat_id = indices[in_id / 6].x;
 
-  uint packed_pos = positions[splat_id];
-  float3 pos_local = unpack_pos(packed_pos, pos_scale_cm, pos_min_cm).xyz;
+  float3 pos_local = bUseFloatPositions != 0u
+                         ? positions_float[splat_id].xyz
+                         : unpack_pos(positions[splat_id], pos_scale_cm, pos_min_cm).xyz;
   float3 pos_world = mul(pos_local, (float3x3)local_to_world);
 
   float4 pos_clip = world_to_clip(pos_world

@@ -194,9 +194,9 @@ void FSplatSceneProxy::CreateRenderThreadResources(
 
 	if (Uses4DInterpolation())
 	{
-		DynamicPositions.emplace(GetNumSplats(), PF_R32_UINT);
+		DynamicPositions.emplace(GetNumSplats(), PF_A32B32G32R32F);
 		DynamicPositions->InitRHI(RHICmdList);
-		DynamicCovariances.emplace(GetNumSplats(), PF_R32G32_UINT);
+		DynamicCovariances.emplace(GetNumSplats() * 2, PF_A32B32G32R32F);
 		DynamicCovariances->InitRHI(RHICmdList);
 		DynamicColors.emplace(GetNumSplats(), PF_FloatRGBA);
 		DynamicColors->InitRHI(RHICmdList);

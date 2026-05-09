@@ -16,8 +16,25 @@
  */
 
 Buffer<uint> positions;
+Buffer<float4> positions_float;
 Buffer<uint2> covariances;
+Buffer<float4> covariances_float;
 RWBuffer<float4> transforms;
+uint bUseFloatPositions;
+uint bUseFloatCovariances;
+
+float3x3 load_cov_mat(uint splat_id)
+{
+  if (bUseFloatCovariances != 0u)
+  {
+    uint cov_base = splat_id * 2u;
+    float4 c0 = covariances_float[cov_base + 0u];
+    float4 c1 = covariances_float[cov_base + 1u];
+    return float3x3(c0.x, c0.y, c0.z, c0.y, c0.w, c1.x, c0.z, c1.x, c1.y);
+  }
+
+  return unpack_cov_mat(covariances[splat_id]);
+}
 
 /**
  * Calculate a 2x2 transform for projecting a splat into screen space.
@@ -33,7 +50,9 @@ RWBuffer<float4> transforms;
     return;
   }
 
-  float4 pos_local = unpack_pos(positions[splat_id], pos_scale_cm, pos_min_cm);
+  float4 pos_local = bUseFloatPositions != 0u
+                         ? positions_float[splat_id]
+                         : unpack_pos(positions[splat_id], pos_scale_cm, pos_min_cm);
   float3 pos_view = mul(pos_local, local_to_view);
 
   if (pos_view.z >= -1e-4f && pos_view.z <= 1e-4f) {
@@ -41,7 +60,7 @@ RWBuffer<float4> transforms;
     return;
   }
 
-  float3x3 sig = unpack_cov_mat(covariances[splat_id]);
+  float3x3 sig = load_cov_mat(splat_id);
 
   float3x3 W = float3x3(local_to_view[0].xyz, local_to_view[1].xyz,
                         local_to_view[2].xyz);

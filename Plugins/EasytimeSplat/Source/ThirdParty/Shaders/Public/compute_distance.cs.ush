@@ -15,8 +15,10 @@
  */
 
 Buffer<uint> positions;
+Buffer<float4> positions_float;
 RWBuffer<uint> indices;
 RWBuffer<uint> distances;
+uint bUseFloatPositions;
 uint distance_scale;
 uint distance_not_visible;
 
@@ -32,8 +34,9 @@ uint distance_not_visible;
     return;
   }
 
-  float4 pos_local =
-      unpack_pos(positions[dispatch_thread_id.x], pos_scale_cm, pos_min_cm);
+  float4 pos_local = bUseFloatPositions != 0u
+                         ? positions_float[dispatch_thread_id.x]
+                         : unpack_pos(positions[dispatch_thread_id.x], pos_scale_cm, pos_min_cm);
   float4 pos_clip = mul(pos_local, local_to_clip);
 
   bool inside_frustum = !(pos_clip.x < -pos_clip.w || pos_clip.x > pos_clip.w ||

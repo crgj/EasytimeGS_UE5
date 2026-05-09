@@ -23,8 +23,8 @@ Buffer<float3> scales;
 Buffer<float4> base_colors;
 
 // UAV parameters (third)
-RWBuffer<uint> out_positions;
-RWBuffer<uint2> out_covariances;
+RWBuffer<float4> out_positions;
+RWBuffer<float4> out_covariances;
 RWBuffer<float4> out_colors;
 
 // Simple packing for UNorm
@@ -121,18 +121,10 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     float3 p1 = xyz_bank[i * num_xyz_banks + k_xyz_1];
     float3 p_interp = lerp(p0, p1, alpha_xyz);
     
-    // Pack Position (Z+ forward, X+ right, Y- up -> X+ forward, Y+ right, Z+ up)
+    // Position in UE centimeters (Z+ forward, X+ right, Y- up -> X+ forward, Y+ right, Z+ up).
     float3 p_ue = float3(p_interp.z, p_interp.x, -p_interp.y);
-    // Match FPackedPos quantization exactly: unpack_pos() does
-    // pos_cm = packed_unorm * pos_scale_cm + pos_min_cm.
     float3 p_cm = p_ue * 100.0f;
-    float x_q = (p_cm.x - pos_min_cm.x) / max(pos_scale_cm.x, 1e-8f);
-    float y_q = (p_cm.y - pos_min_cm.y) / max(pos_scale_cm.y, 1e-8f);
-    float z_q = (p_cm.z - pos_min_cm.z) / max(pos_scale_cm.z, 1e-8f);
-    uint pack_p = (uint(round(saturate(z_q / 1023.0f) * 1023.0f)) << 22) |
-                  (uint(round(saturate(y_q / 2047.0f) * 2047.0f)) << 11) |
-                  uint(round(saturate(x_q / 2047.0f) * 2047.0f));
-    out_positions[i] = pack_p;
+    out_positions[i] = float4(p_cm, 1.0f);
 
     // 3. Interpolate Rotation & Scale
     uint k_rot = uint(current_frame) / max(1u, rot_stride);
@@ -192,15 +184,9 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
     Sigma[1] = clamp(Sigma[1], float3(-1e8f, -1e8f, -1e8f), float3(1e8f, 1e8f, 1e8f));
     Sigma[2] = clamp(Sigma[2], float3(-1e8f, -1e8f, -1e8f), float3(1e8f, 1e8f, 1e8f));
     
-    // Pack Covariance
-    uint xx = to_custom_float(Sigma[0][0], 0, 5, 5);
-    uint xy = to_custom_float(Sigma[0][1], 1, 5, 5);
-    uint xz = to_custom_float(Sigma[0][2], 1, 5, 5);
-    uint yy = to_custom_float(Sigma[1][1], 0, 5, 5);
-    uint yz = to_custom_float(Sigma[1][2], 1, 5, 5);
-    uint zz = to_custom_float(Sigma[2][2], 0, 5, 6);
-    
-    out_covariances[i] = uint2( (yy << 22) | (yz << 11) | zz, (xx << 22) | (xy << 11) | xz ); // High/Low 32 bit split
+    uint cov_base = i * 2u;
+    out_covariances[cov_base + 0u] = float4(Sigma[0][0], Sigma[0][1], Sigma[0][2], Sigma[1][1]);
+    out_covariances[cov_base + 1u] = float4(Sigma[1][2], Sigma[2][2], 0.0f, 0.0f);
     
     // 4. Color and opacity
     float4 base_color = saturate(base_colors[i]);

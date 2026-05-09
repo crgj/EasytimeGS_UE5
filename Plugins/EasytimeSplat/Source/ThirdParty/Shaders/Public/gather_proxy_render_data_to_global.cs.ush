@@ -16,6 +16,19 @@ static const float SH_C3_4 = -0.4570457994644658f;
 static const float SH_C3_5 = 1.445305721320277f;
 static const float SH_C3_6 = -0.5900435899266435f;
 
+float3x3 load_cov_mat(uint splat_id)
+{
+  if (bUseFloatCovariances != 0u)
+  {
+    uint cov_base = splat_id * 2u;
+    float4 c0 = covariances_float[cov_base + 0u];
+    float4 c1 = covariances_float[cov_base + 1u];
+    return float3x3(c0.x, c0.y, c0.z, c0.y, c0.w, c1.x, c0.z, c1.x, c1.y);
+  }
+
+  return unpack_cov_mat(covariances[splat_id]);
+}
+
 float3 eval_sh(uint splat_id, float3 view_dir_src)
 {
   if (sh_degree == 0u || sh_num_triplets == 0u)
@@ -99,7 +112,9 @@ float3 apply_color_controls(float3 color)
   }
 
   uint global_id = global_offset + local_id;
-  float4 pos_local = unpack_pos(positions[local_id], pos_scale_cm, pos_min_cm);
+  float4 pos_local = bUseFloatPositions != 0u
+                         ? positions_float[local_id]
+                         : unpack_pos(positions[local_id], pos_scale_cm, pos_min_cm);
   float4 pos_world = mul(pos_local, local_to_world);
   float3 pos_view = mul(pos_local, local_to_view);
   float4 pos_clip = mul(pos_local, local_to_clip);
@@ -117,7 +132,7 @@ float3 apply_color_controls(float3 color)
   // WDD-2026-04-06-GlobalTransformInGather-UpgradeComment:GlobalSortStep4-v7
   // Recompute 2x2 transform directly from covariances to avoid external per-proxy
   // transform buffer hazards in multi-proxy global sort mode.
-  float3x3 sig = unpack_cov_mat(covariances[local_id]);
+  float3x3 sig = load_cov_mat(local_id);
   float3x3 W = float3x3(local_to_view[0].xyz, local_to_view[1].xyz, local_to_view[2].xyz);
   float scale_x = -pos_view.x / pos_view.z;
   float scale_y = -pos_view.y / pos_view.z;

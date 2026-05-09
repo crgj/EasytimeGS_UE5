@@ -73,6 +73,9 @@ FRDGPassRef CalculateDistances(
 		FMatrix44f(Proxy->GetLocalToWorld() * GetViewProj(View));
 	DistanceParams->num_splats = Proxy->GetNumSplats();
 	DistanceParams->Positions = MakePositionParams(Proxy);
+	DistanceParams->bUseFloatPositions = Proxy->Uses4DInterpolation() ? 1u : 0u;
+	DistanceParams->positions_float =
+		Proxy->Uses4DInterpolation() ? Proxy->GetDynamicPositionsSRV() : nullptr;
 	DistanceParams->distance_scale =
 		bUse32BitDistances ? 0xFFFFFFFEu : 0x0000FFFEu;
 	DistanceParams->distance_not_visible =
@@ -193,6 +196,9 @@ FRDGPassRef ComputeTransforms(
 		Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	TransformParams->Positions.pos_min_cm = PosMinCM;
 	TransformParams->Positions.pos_scale_cm = PosScaleCM;
+	TransformParams->bUseFloatPositions = Proxy->Uses4DInterpolation() ? 1u : 0u;
+	TransformParams->positions_float =
+		Proxy->Uses4DInterpolation() ? Proxy->GetDynamicPositionsSRV() : nullptr;
 
 	if (InterpPositions)
 	{
@@ -206,6 +212,9 @@ FRDGPassRef ComputeTransforms(
 	}
 
 	TransformParams->covariances = Proxy->GetCovariancesSRV();
+	TransformParams->bUseFloatCovariances = Proxy->Uses4DInterpolation() ? 1u : 0u;
+	TransformParams->covariances_float =
+		Proxy->Uses4DInterpolation() ? Proxy->GetDynamicCovariancesSRV() : nullptr;
 	if (InterpCovariances)
 	{
 		TransformParams->bUseRDGCovariances = 1;
@@ -624,7 +633,13 @@ FRDGPassRef GatherProxyRenderDataToGlobal(
 	Params->Positions.positions = Proxy->GetPositionsSRV(PosMinCM, PosScaleCM);
 	Params->Positions.pos_min_cm = PosMinCM;
 	Params->Positions.pos_scale_cm = PosScaleCM;
+	Params->bUseFloatPositions = Proxy->Uses4DInterpolation() ? 1u : 0u;
+	Params->positions_float =
+		Proxy->Uses4DInterpolation() ? Proxy->GetDynamicPositionsSRV() : nullptr;
 	Params->covariances = Proxy->GetCovariancesSRV();
+	Params->bUseFloatCovariances = Proxy->Uses4DInterpolation() ? 1u : 0u;
+	Params->covariances_float =
+		Proxy->Uses4DInterpolation() ? Proxy->GetDynamicCovariancesSRV() : nullptr;
 	Params->colors = Proxy->GetColorsSRV();
 	Params->sh_coefficients = Proxy->GetSHCoefficientsSRV();
 	Params->out_global_indices =

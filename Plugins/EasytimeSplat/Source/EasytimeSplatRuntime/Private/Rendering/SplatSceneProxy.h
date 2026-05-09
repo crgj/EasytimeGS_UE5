@@ -125,12 +125,14 @@ public:
 	 */
 	FShaderResourceViewRHIRef GetCovariancesSRV() const
 	{
-		if (bUse4DInterpolation && DynamicCovariances)
-		{
-			return DynamicCovariances->ShaderResourceViewRHI;
-		}
 		check(Asset);
 		return Asset->GetCovariancesSRV();
+	}
+
+	FShaderResourceViewRHIRef GetDynamicCovariancesSRV() const
+	{
+		check(DynamicCovariances);
+		return DynamicCovariances->ShaderResourceViewRHI;
 	}
 
 	/**
@@ -165,15 +167,14 @@ public:
 	FShaderResourceViewRHIRef
 	GetPositionsSRV(FVector3f& OutPosMinCM, FVector3f& OutPosScaleCM) const
 	{
-		if (bUse4DInterpolation && DynamicPositions)
-		{
-			check(Asset);
-			static_cast<void>(
-				Asset->GetPositionsSRV(OutPosMinCM, OutPosScaleCM));
-			return DynamicPositions->ShaderResourceViewRHI;
-		}
 		check(Asset);
 		return Asset->GetPositionsSRV(OutPosMinCM, OutPosScaleCM);
+	}
+
+	FShaderResourceViewRHIRef GetDynamicPositionsSRV() const
+	{
+		check(DynamicPositions);
+		return DynamicPositions->ShaderResourceViewRHI;
 	}
 
 	// 4DGS Bank Accessors
