@@ -15,7 +15,7 @@
  * @param in_color - The splat's base color.
  * @param out_color - Fragment color.
  */
-void main(in half2 sig_div_sqrt_2 : DELTA_STD_DEVS,
+void main(in float2 sig_div_sqrt_2 : DELTA_STD_DEVS,
           in nointerpolation float4 in_color : COLOR,
           out float4 out_color : SV_Target0) {
   /**
@@ -32,7 +32,7 @@ void main(in half2 sig_div_sqrt_2 : DELTA_STD_DEVS,
 	 *
 	 * Note: This is r_蟽^2 / 2, as it moves a division from here to earlier.
 	 */
-  half sig_sq_div_2 = dot(sig_div_sqrt_2, sig_div_sqrt_2);
+  float sig_sq_div_2 = dot(sig_div_sqrt_2, sig_div_sqrt_2);
 
   /**
 	 * The Gaussian function (as used here) is of the form:

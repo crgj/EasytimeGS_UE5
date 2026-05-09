@@ -40,9 +40,9 @@ void main(in uint in_id : SV_VertexID,
 #if WITH_VIEW_ID
           in uint in_view_id : SV_ViewID,
 #endif
-          out half2 out_sig_div_sqrt_2 : DELTA_STD_DEVS,
+          out float2 out_sig_div_sqrt_2 : DELTA_STD_DEVS,
           out nointerpolation float4 out_color : COLOR,
-          out half4 out_position : SV_Position) {
+          out float4 out_position : SV_Position) {
   uint sorted_id = in_id / 6;
   uint splat_id = SortedGlobalIndices[sorted_id];
 
@@ -58,23 +58,23 @@ void main(in uint in_id : SV_VertexID,
                          pos_clip.z > pos_clip.w;
 
   if (outside_frustum) {
-    out_position = half4(0.f, 0.f, 0.f, 0.f);
+    out_position = float4(0.f, 0.f, 0.f, 0.f);
     return;
   }
 
-  half4 t = GlobalTransforms[splat_id];
-  half2 corners[6] = {
-      half2(-RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
-      half2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
-      half2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
-      half2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
-      half2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
-      half2(RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2)};
-  half2 offset = mul(half2x2(t.x, t.y, t.z, t.w), corners[in_id % 6]);
+  float4 t = GlobalTransforms[splat_id];
+  float2 corners[6] = {
+      float2(-RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      float2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      float2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
+      float2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      float2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
+      float2(RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2)};
+  float2 offset = mul(float2x2(t.x, t.y, t.z, t.w), corners[in_id % 6]);
   offset /= get_render_resolution();
 
   out_position =
-      half4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
+      float4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
   out_sig_div_sqrt_2 = corners[in_id % 6];
   out_color = GlobalColors[splat_id];
 }

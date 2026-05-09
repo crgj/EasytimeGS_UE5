@@ -22,7 +22,7 @@ Buffer<uint> indices;
 Buffer<uint2> indices;
 #endif
 Buffer<uint> positions;
-Buffer<half4> transforms;
+Buffer<float4> transforms;
 Buffer<float4> colors;
 Buffer<float3> sh_coefficients;
 
@@ -129,18 +129,18 @@ void main(in uint in_id : SV_VertexID,
 #if WITH_VIEW_ID
           in uint in_view_id : SV_ViewID,
 #endif
-          out half2 out_sig_div_sqrt_2 : DELTA_STD_DEVS,
+          out float2 out_sig_div_sqrt_2 : DELTA_STD_DEVS,
           out nointerpolation float4 out_color : COLOR,
-          out half4 out_position : SV_Position) {
+          out float4 out_position : SV_Position) {
   // If using CPU sorting, indices are packed as (index, distance). No #if
   // needed if explicitly adding .x.
   uint splat_id = indices[in_id / 6].x;
 
   uint packed_pos = positions[splat_id];
-  half3 pos_local = unpack_pos(packed_pos, pos_scale_cm, pos_min_cm);
-  half3 pos_world = mul(pos_local, (half3x3)local_to_world);
+  float3 pos_local = unpack_pos(packed_pos, pos_scale_cm, pos_min_cm).xyz;
+  float3 pos_world = mul(pos_local, (float3x3)local_to_world);
 
-  half4 pos_clip = world_to_clip(pos_world
+  float4 pos_clip = world_to_clip(pos_world
 #if WITH_VIEW_ID
                                  ,
                                  in_view_id
@@ -152,7 +152,7 @@ void main(in uint in_id : SV_VertexID,
                          pos_clip.z > pos_clip.w;
 
   if (outside_frustum) {
-    out_position = half4(0.f, 0.f, 0.f, 0.f);
+    out_position = float4(0.f, 0.f, 0.f, 0.f);
     return;
   }
 
@@ -167,19 +167,19 @@ void main(in uint in_id : SV_VertexID,
    * perspective divide.
    * 4. Per vertex, out_sig_div_sqrt_2 is +- x sigma / sqrt(2).
    */
-  half4 t = transforms[splat_id];
-  half2 corners[6] = {
-      half2(-RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
-      half2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
-      half2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
-      half2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
-      half2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
-      half2(RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2)};
-  half2 offset = mul(half2x2(t.x, t.y, t.z, t.w), corners[in_id % 6]);
+  float4 t = transforms[splat_id];
+  float2 corners[6] = {
+      float2(-RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      float2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      float2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
+      float2(RADIUS_SIGMA_OVER_SQRT_2, -RADIUS_SIGMA_OVER_SQRT_2),
+      float2(-RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2),
+      float2(RADIUS_SIGMA_OVER_SQRT_2, RADIUS_SIGMA_OVER_SQRT_2)};
+  float2 offset = mul(float2x2(t.x, t.y, t.z, t.w), corners[in_id % 6]);
   offset /= get_render_resolution();
 
   out_position =
-      half4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
+      float4(pos_clip.xy + offset * pos_clip.w, pos_clip.z, pos_clip.w);
   out_sig_div_sqrt_2 = corners[in_id % 6];
 
   float4 base_color = colors[splat_id];

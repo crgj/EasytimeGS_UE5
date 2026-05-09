@@ -46,6 +46,8 @@ class FComputeDistanceCS final : public FGlobalShader
 	SHADER_PARAMETER_STRUCT_INCLUDE(FPackedPositionParameters, Positions)
 	SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, positionsRDG)
 	SHADER_PARAMETER(uint32, bUseRDGPositions)
+	SHADER_PARAMETER(uint32, distance_scale)
+	SHADER_PARAMETER(uint32, distance_not_visible)
 	SHADER_PARAMETER_UAV(RWBuffer<uint>, indices)
 	SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, distances)
 	END_SHADER_PARAMETER_STRUCT()

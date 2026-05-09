@@ -60,8 +60,11 @@ FRDGPassRef CalculateDistances(
 		GlobalShaderMap->GetShader<Shaders::FComputeDistanceCS>();
 
 	FRDGBufferUAV* IndicesUAV = GraphBuilder.CreateUAV(Indices, PF_R32_UINT);
+	const bool bUse32BitDistances = Proxy->Uses4DInterpolation();
+	const EPixelFormat DistanceFormat =
+		bUse32BitDistances ? PF_R32_UINT : PF_R16_UINT;
 	FRDGBufferUAV* DistancesUAV =
-		GraphBuilder.CreateUAV(Distances, PF_R16_UINT);
+		GraphBuilder.CreateUAV(Distances, DistanceFormat);
 
 	Shaders::FComputeDistanceCS::FParameters* DistanceParams =
 		GraphBuilder
@@ -70,6 +73,10 @@ FRDGPassRef CalculateDistances(
 		FMatrix44f(Proxy->GetLocalToWorld() * GetViewProj(View));
 	DistanceParams->num_splats = Proxy->GetNumSplats();
 	DistanceParams->Positions = MakePositionParams(Proxy);
+	DistanceParams->distance_scale =
+		bUse32BitDistances ? 0xFFFFFFFEu : 0x0000FFFEu;
+	DistanceParams->distance_not_visible =
+		bUse32BitDistances ? 0xFFFFFFFFu : 0x0000FFFFu;
 
 	if (InterpPositions)
 	{
@@ -367,8 +374,13 @@ FRDGPassRef SortSplats(
 	FRDGBuffer* Indices2 =
 		GraphBuilder.CreateBuffer(IndexDesc, TEXT("Indices2"));
 
+	const bool bUse32BitDistances = Proxy->Uses4DInterpolation();
+	const EPixelFormat DistanceFormat =
+		bUse32BitDistances ? PF_R32_UINT : PF_R16_UINT;
 	FRDGBufferDesc DistanceDesc =
-		FRDGBufferDesc::CreateBufferDesc(sizeof(uint16), NumSplats);
+		FRDGBufferDesc::CreateBufferDesc(
+			bUse32BitDistances ? sizeof(uint32) : sizeof(uint16),
+			NumSplats);
 	FRDGBuffer* Distances2 =
 		GraphBuilder.CreateBuffer(DistanceDesc, TEXT("Distances2"));
 
@@ -378,7 +390,7 @@ FRDGPassRef SortSplats(
 	SetupParameters->Indices2UAV =
 		GraphBuilder.CreateUAV(Indices2, PF_R32_UINT);
 	SetupParameters->Distances2UAV =
-		GraphBuilder.CreateUAV(Distances2, PF_R16_UINT);
+		GraphBuilder.CreateUAV(Distances2, DistanceFormat);
 
 	GraphBuilder.AddPass(
 		RDG_EVENT_NAME("Splat: RDG Producer"),
@@ -393,13 +405,13 @@ FRDGPassRef SortSplats(
 	SortParameters->Indices2SRV = GraphBuilder.CreateSRV(Indices2, PF_R32_UINT);
 	SortParameters->Indices2UAV = GraphBuilder.CreateUAV(Indices2, PF_R32_UINT);
 	SortParameters->DistancesSRV =
-		GraphBuilder.CreateSRV(Distances, PF_R16_UINT);
+		GraphBuilder.CreateSRV(Distances, DistanceFormat);
 	SortParameters->DistancesUAV =
-		GraphBuilder.CreateUAV(Distances, PF_R16_UINT);
+		GraphBuilder.CreateUAV(Distances, DistanceFormat);
 	SortParameters->Distances2SRV =
-		GraphBuilder.CreateSRV(Distances2, PF_R16_UINT);
+		GraphBuilder.CreateSRV(Distances2, DistanceFormat);
 	SortParameters->Distances2UAV =
-		GraphBuilder.CreateUAV(Distances2, PF_R16_UINT);
+		GraphBuilder.CreateUAV(Distances2, DistanceFormat);
 
 	// `Compute` used for mobile support, but this could be `AsyncCompute`.
 	// `NeverCull` ensures that this pass still happens even if RDG doesn't think
@@ -411,7 +423,8 @@ FRDGPassRef SortSplats(
 		[NumSplats,
 	     SortParameters,
 	     SRV = Proxy->GetIndicesSRV(),
-	     UAV = Proxy->GetIndicesUAV()](FRHIComputeCommandList& RHICmdList)
+	     UAV = Proxy->GetIndicesUAV(),
+	     SortDepthMask = bUse32BitDistances ? 0xFFFFFFFFu : DepthMask](FRHIComputeCommandList& RHICmdList)
 		{
 			FGPUSortBuffers SortBuffers;
 			SortBuffers.RemoteKeySRVs[0] =
@@ -433,7 +446,7 @@ FRDGPassRef SortSplats(
 				static_cast<FRHICommandList&>(RHICmdList),
 				SortBuffers,
 				0,
-				DepthMask,
+				SortDepthMask,
 				NumSplats,
 				GMaxRHIFeatureLevel);
 			check(ResultIndex == 0);

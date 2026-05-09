@@ -17,6 +17,8 @@
 Buffer<uint> positions;
 RWBuffer<uint> indices;
 RWBuffer<uint> distances;
+uint distance_scale;
+uint distance_not_visible;
 
 /**
  * Measure the distance to a splat.
@@ -40,8 +42,8 @@ RWBuffer<uint> distances;
 
   uint index = dispatch_thread_id.x;
   uint distance = inside_frustum
-                      ? uint(saturate(pos_clip.z / pos_clip.w) * DISTANCE_SCALE)
-                      : DISTANCE_NOT_VISIBLE;
+                      ? uint(saturate(pos_clip.z / pos_clip.w) * float(distance_scale))
+                      : distance_not_visible;
 
   indices[dispatch_thread_id.x] = index;
   distances[dispatch_thread_id.x] = distance;

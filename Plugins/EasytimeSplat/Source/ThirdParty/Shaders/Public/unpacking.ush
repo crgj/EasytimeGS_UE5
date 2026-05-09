@@ -17,7 +17,7 @@
  * @param offset - First lowest bit holding the value to unpack, of size s+e+m.
  * @return half containing the extracted value.
  */
-half unpack_f16(uint s, uint e, uint m, uint packed, uint offset) {
+float unpack_f16(uint s, uint e, uint m, uint packed, uint offset) {
   uint shift = 15 - e - m;
   uint mask = ((1 << (s + e + m)) - 1) << shift;
   if (s == 1 && offset == 0) {
@@ -39,12 +39,12 @@ half unpack_f16(uint s, uint e, uint m, uint packed, uint offset) {
  * @return half containing unnormalized value equal to the packed UNorm, when
  * interpreted as an integer.
  */
-half unpack_unorm(uint bits, uint packed, uint offset) {
+float unpack_unorm(uint bits, uint packed, uint offset) {
   uint Mask = (1 << bits) - 1;
   if (offset == 0) {
-    return half(packed & Mask);
+    return float(packed & Mask);
   } else {
-    return half((packed >> offset) & Mask);
+    return float((packed >> offset) & Mask);
   }
 }
 
@@ -55,15 +55,15 @@ half unpack_unorm(uint bits, uint packed, uint offset) {
  * @return half3x3 holding extracted covariance matrix, fully populated (not
  * upper triangular).
  */
-half3x3 unpack_cov_mat(uint2 packedCovMat) {
-  half xx = unpack_f16(0, 5, 5, packedCovMat.y, 22);
-  half xy = unpack_f16(1, 5, 5, packedCovMat.y, 11);
-  half xz = unpack_f16(1, 5, 5, packedCovMat.y, 0);
-  half yy = unpack_f16(0, 5, 5, packedCovMat.x, 22);
-  half yz = unpack_f16(1, 5, 5, packedCovMat.x, 11);
-  half zz = unpack_f16(0, 5, 6, packedCovMat.x, 0);
+float3x3 unpack_cov_mat(uint2 packedCovMat) {
+  float xx = unpack_f16(0, 5, 5, packedCovMat.y, 22);
+  float xy = unpack_f16(1, 5, 5, packedCovMat.y, 11);
+  float xz = unpack_f16(1, 5, 5, packedCovMat.y, 0);
+  float yy = unpack_f16(0, 5, 5, packedCovMat.x, 22);
+  float yz = unpack_f16(1, 5, 5, packedCovMat.x, 11);
+  float zz = unpack_f16(0, 5, 6, packedCovMat.x, 0);
 
-  return half3x3(xx, xy, xz, xy, yy, yz, xz, yz, zz);
+  return float3x3(xx, xy, xz, xy, yy, yz, xz, yz, zz);
 }
 
 /**
@@ -76,11 +76,11 @@ half3x3 unpack_cov_mat(uint2 packedCovMat) {
  * @param offset - The origin that all packed positions are relative to.
  * @return half containing unpacked (x, y, z).
  */
-half4 unpack_pos(uint packed, half3 scale, half3 offset) {
-  half x = unpack_unorm(11, packed, 0);
-  half y = unpack_unorm(11, packed, 11);
-  half z = unpack_unorm(10, packed, 22);
+float4 unpack_pos(uint packed, float3 scale, float3 offset) {
+  float x = unpack_unorm(11, packed, 0);
+  float y = unpack_unorm(11, packed, 11);
+  float z = unpack_unorm(10, packed, 22);
 
-  return half4(half3(x, y, z) * scale + offset, 1.f);
+  return float4(float3(x, y, z) * scale + offset, 1.f);
 }
 

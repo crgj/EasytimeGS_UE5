@@ -427,8 +427,11 @@ void FSplatSceneViewExtension::PreRenderView_RenderThread(
 			Proxy->GetIndicesFake() =
 				GraphBuilder.CreateBuffer(IndexDesc, TEXT("Indices"));
 
+			const bool bUse32BitDistances = Proxy->Uses4DInterpolation();
 			FRDGBufferDesc DistanceDesc =
-				FRDGBufferDesc::CreateBufferDesc(sizeof(uint16), NumSplats);
+				FRDGBufferDesc::CreateBufferDesc(
+					bUse32BitDistances ? sizeof(uint32) : sizeof(uint16),
+					NumSplats);
 			Proxy->GetDistancesFake() =
 				GraphBuilder.CreateBuffer(DistanceDesc, TEXT("Distances"));
 
